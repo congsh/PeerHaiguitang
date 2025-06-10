@@ -7,36 +7,12 @@
  * PeerJS服务器选项列表
  */
 const peerServerOptions = [
-    // 第一选择：使用peerjs.io官方公共服务器
+    // 使用0.peerjs.com作为唯一服务器选项
     {
         host: '0.peerjs.com',
         port: 443,
         path: '/',
         secure: true,
-        key: 'peerjs'
-    },
-    // 第二选择：使用cloudflare上的PeerJS服务器
-    {
-        host: 'peerjs-server.herokuapp.com',
-        port: 443,
-        path: '/',
-        secure: true,
-        key: 'peerjs'
-    },
-    // 第三选择：另一个备用服务器
-    {
-        host: 'peer-server.dev',
-        port: 443,
-        path: '/',
-        secure: true,
-        key: 'peerjs'
-    },
-    // 第四选择：使用本地PeerJS服务器（如果用户自己部署）
-    {
-        host: 'localhost',
-        port: 9000,
-        path: '/',
-        secure: false,
         key: 'peerjs'
     }
 ];

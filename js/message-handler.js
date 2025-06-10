@@ -76,11 +76,23 @@ function handleJoinRequest(data, conn) {
     showSystemMessage(`${data.name} 加入了房间`);
     
     // 发送确认消息回参与者
-    conn.send({
+    const confirmMessage = {
         type: 'join-confirmed',
         roomName: roomName,
-        hostName: userName
-    });
+        hostName: userName,
+        timestamp: Date.now()
+    };
+    
+    console.log('发送确认消息:', confirmMessage);
+    conn.send(confirmMessage);
+    
+    // 为确保参与者收到确认，设置重试机制
+    setTimeout(() => {
+        // 再次发送确认，以防第一次没收到
+        console.log('重新发送确认消息');
+        confirmMessage.timestamp = Date.now();
+        conn.send(confirmMessage);
+    }, 2000);
     
     // 广播参与者列表更新
     broadcastParticipants();

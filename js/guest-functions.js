@@ -44,17 +44,12 @@ function joinRoom() {
  * @param {string} roomId - 房间ID
  */
 function tryJoinRoom(roomId) {
-    // 获取当前服务器配置
-    const serverConfig = getCurrentPeerServer();
+    // 由于我们只有一个服务器选项，简化连接逻辑
+    const serverConfig = peerServerOptions[0];
+    currentServerIndex = 0; // 确保使用第一个(也是唯一的)服务器
     
     // 更新服务器状态指示器
-    for (let i = 0; i < peerServerOptions.length; i++) {
-        if (i < currentServerIndex) {
-            updateServerStatus(i, 'failed');
-        } else if (i === currentServerIndex) {
-            updateServerStatus(i, 'connecting');
-        }
-    }
+    updateServerStatus(0, 'connecting');
     
     showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`, 'guest-chat-messages');
     
@@ -67,7 +62,7 @@ function tryJoinRoom(roomId) {
         
         // 初始化PeerJS
         peer = new Peer(null, {
-            debug: 2,
+            debug: 3, // 提高调试级别
             config: {
                 'iceServers': getStunServers()
             },
@@ -88,22 +83,13 @@ function tryJoinRoom(roomId) {
                 }
                 
                 // 更新服务器状态
-                updateServerStatus(currentServerIndex, 'failed');
-                
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`当前服务器连接超时，尝试下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                } else {
-                    // 所有服务器都尝试失败
-                    resetPeerServerIndex();
-                    showSystemMessage('连接失败，所有服务器均无法连接', 'guest-chat-messages');
-                    alert('连接失败，请检查网络连接或稍后重试');
-                    showScreen('guest-setup-screen');
-                }
+                updateServerStatus(0, 'failed');
+                resetPeerServerIndex();
+                showSystemMessage('连接服务器超时，请检查网络连接', 'guest-chat-messages');
+                alert('连接失败，请检查网络连接或稍后重试');
+                showScreen('guest-setup-screen');
             }
-        }, 10000); // 10秒超时
+        }, 15000); // 15秒超时
         
         // 设置PeerJS事件监听
         peer.on('open', (myPeerId) => {
@@ -112,93 +98,12 @@ function tryJoinRoom(roomId) {
             peerId = myPeerId;
             
             // 更新服务器状态
-            updateServerStatus(currentServerIndex, 'connected');
+            updateServerStatus(0, 'connected');
             
             showSystemMessage(`已连接到服务器: ${serverConfig.host}`, 'guest-chat-messages');
             showSystemMessage(`正在连接到房间: ${roomId}...`, 'guest-chat-messages');
             
-            try {
-                // 连接到主持人
-                hostConnection = peer.connect(roomId, {
-                    metadata: {
-                        name: userName
-                    },
-                    reliable: true
-                });
-                
-                if (!hostConnection) {
-                    throw new Error('无法创建连接');
-                }
-                
-                // 设置连接超时
-                const connectionTimeout = setTimeout(() => {
-                    if (hostConnection && !hostConnection.open) {
-                        // 如果还有其他服务器可尝试
-                        if (currentServerIndex < peerServerOptions.length - 1) {
-                            showSystemMessage(`房间连接超时，尝试下一个服务器...`, 'guest-chat-messages');
-                            getNextPeerServer();
-                            tryJoinRoom(roomId);
-                        } else {
-                            // 所有服务器都尝试失败
-                            resetPeerServerIndex();
-                            showSystemMessage('连接超时，请检查房间ID是否正确', 'guest-chat-messages');
-                            alert('连接超时，请检查房间ID是否正确');
-                            resetState();
-                            showScreen('guest-setup-screen');
-                        }
-                    }
-                }, 8000); // 8秒超时
-                
-                hostConnection.on('open', () => {
-                    clearTimeout(connectionTimeout);
-                    console.log('Connected to host');
-                    updateConnectionStatus('connected', false);
-                    
-                    // 发送加入请求
-                    hostConnection.send({
-                        type: 'join-request',
-                        name: userName,
-                        peerId: myPeerId
-                    });
-                    
-                    // 显示欢迎消息
-                    showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
-                });
-                
-                hostConnection.on('data', handleHostData);
-                
-                hostConnection.on('close', () => {
-                    console.log('Connection to host closed');
-                    updateConnectionStatus('disconnected', false);
-                    showSystemMessage('与主持人的连接已关闭', 'guest-chat-messages');
-                    
-                    // 返回欢迎界面
-                    setTimeout(() => {
-                        alert('房间已关闭或主持人已离开');
-                        showScreen('welcome-screen');
-                    }, 1000);
-                });
-                
-                hostConnection.on('error', (err) => {
-                    console.error('Connection to host error:', err);
-                    updateConnectionStatus('disconnected', false);
-                    showSystemMessage(`连接错误: ${err}`, 'guest-chat-messages');
-                    
-                    setTimeout(() => {
-                        alert('连接错误，请检查房间ID后重试');
-                        showScreen('guest-setup-screen');
-                    }, 1000);
-                });
-            } catch (error) {
-                console.error('Failed to establish connection:', error);
-                showSystemMessage(`连接错误: ${error.message}`, 'guest-chat-messages');
-                updateConnectionStatus('disconnected', false);
-                
-                setTimeout(() => {
-                    alert(`连接错误: ${error.message}`);
-                    showScreen('guest-setup-screen');
-                }, 1000);
-            }
+            connectToHost(roomId, myPeerId);
         });
         
         peer.on('error', (err) => {
@@ -206,46 +111,18 @@ function tryJoinRoom(roomId) {
             console.error('PeerJS error:', err);
             
             // 更新服务器状态
-            updateServerStatus(currentServerIndex, 'failed');
+            updateServerStatus(0, 'failed');
             
             if (err.type === 'peer-unavailable') {
                 showSystemMessage('找不到指定的房间，请检查房间ID是否正确', 'guest-chat-messages');
-                
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`尝试使用下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                } else {
-                    // 所有服务器都尝试失败
-                    resetPeerServerIndex();
-                    setTimeout(() => {
-                        alert('找不到指定的房间，请检查房间ID后重试');
-                        showScreen('guest-setup-screen');
-                    }, 1000);
-                }
+                setTimeout(() => {
+                    alert('找不到指定的房间，请检查房间ID后重试');
+                    showScreen('guest-setup-screen');
+                }, 1000);
                 return;
             }
             
-            if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`服务器连接失败，尝试下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                } else {
-                    // 所有服务器都尝试失败
-                    resetPeerServerIndex();
-                    showSystemMessage('连接失败，所有服务器均无法连接', 'guest-chat-messages');
-                    setTimeout(() => {
-                        alert('连接失败，请检查网络连接或稍后重试');
-                        showScreen('guest-setup-screen');
-                    }, 1000);
-                }
-                return;
-            }
-            
-            // 其他错误
+            // 其他类型错误
             showSystemMessage(`连接错误: ${err.type}`, 'guest-chat-messages');
             setTimeout(() => {
                 alert(`连接错误: ${err.type}`);
@@ -259,6 +136,109 @@ function tryJoinRoom(roomId) {
         
         setTimeout(() => {
             alert(`设置错误: ${error.message}`);
+            showScreen('guest-setup-screen');
+        }, 1000);
+    }
+}
+
+/**
+ * 连接到主持人
+ * @param {string} roomId - 房间ID
+ * @param {string} myPeerId - 我的Peer ID
+ */
+function connectToHost(roomId, myPeerId) {
+    try {
+        // 连接到主持人
+        hostConnection = peer.connect(roomId, {
+            metadata: {
+                name: userName,
+                peerId: myPeerId
+            },
+            reliable: true
+        });
+        
+        if (!hostConnection) {
+            throw new Error('无法创建连接');
+        }
+        
+        // 设置连接超时
+        const connectionTimeout = setTimeout(() => {
+            if (hostConnection && !hostConnection.open) {
+                showSystemMessage('连接到房间超时，可能是网络问题或房间ID不正确', 'guest-chat-messages');
+                alert('连接超时，请检查房间ID是否正确');
+                resetState();
+                showScreen('guest-setup-screen');
+            }
+        }, 10000); // 10秒超时
+        
+        hostConnection.on('open', () => {
+            clearTimeout(connectionTimeout);
+            console.log('Connected to host');
+            updateConnectionStatus('connected', false);
+            
+            // 发送加入请求
+            const joinRequest = {
+                type: 'join-request',
+                name: userName,
+                peerId: myPeerId,
+                timestamp: Date.now() // 添加时间戳避免消息被认为是重复
+            };
+            
+            console.log('发送加入请求:', joinRequest);
+            hostConnection.send(joinRequest);
+            
+            // 设置确认超时
+            let confirmationTimeout = setTimeout(() => {
+                console.log('确认超时，重试发送加入请求');
+                joinRequest.timestamp = Date.now(); // 更新时间戳
+                hostConnection.send(joinRequest);
+                
+                // 第二次超时后提示用户
+                confirmationTimeout = setTimeout(() => {
+                    console.log('确认再次超时，提示用户');
+                    showSystemMessage('主持人未确认加入请求，可能是网络问题', 'guest-chat-messages');
+                    alert('连接已建立但主持人未响应，请尝试重新加入或联系主持人');
+                }, 10000);
+            }, 5000);
+            
+            // 保存确认超时引用以便在收到确认后清除
+            hostConnection.confirmationTimeout = confirmationTimeout;
+            
+            // 显示欢迎消息
+            showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
+        });
+        
+        hostConnection.on('data', handleHostData);
+        
+        hostConnection.on('close', () => {
+            console.log('Connection to host closed');
+            updateConnectionStatus('disconnected', false);
+            showSystemMessage('与主持人的连接已关闭', 'guest-chat-messages');
+            
+            // 返回欢迎界面
+            setTimeout(() => {
+                alert('房间已关闭或主持人已离开');
+                showScreen('welcome-screen');
+            }, 1000);
+        });
+        
+        hostConnection.on('error', (err) => {
+            console.error('Connection to host error:', err);
+            updateConnectionStatus('disconnected', false);
+            showSystemMessage(`连接错误: ${err}`, 'guest-chat-messages');
+            
+            setTimeout(() => {
+                alert('连接错误，请检查房间ID后重试');
+                showScreen('guest-setup-screen');
+            }, 1000);
+        });
+    } catch (error) {
+        console.error('Failed to establish connection:', error);
+        showSystemMessage(`连接错误: ${error.message}`, 'guest-chat-messages');
+        updateConnectionStatus('disconnected', false);
+        
+        setTimeout(() => {
+            alert(`连接错误: ${error.message}`);
             showScreen('guest-setup-screen');
         }, 1000);
     }
@@ -279,6 +259,12 @@ function handleHostData(data) {
             
         case 'join-confirmed':
             // 处理加入确认
+            console.log('收到加入确认消息');
+            // 清除确认超时定时器
+            if (hostConnection && hostConnection.confirmationTimeout) {
+                clearTimeout(hostConnection.confirmationTimeout);
+                hostConnection.confirmationTimeout = null;
+            }
             showSystemMessage('主持人已确认你的加入请求', 'guest-chat-messages');
             showScreen('guest-room-screen');
             document.getElementById('guest-room-name').textContent = `房间: ${data.roomName}`;

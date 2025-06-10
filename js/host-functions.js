@@ -66,23 +66,18 @@ function tryCreateRoom() {
     // 生成自定义房间ID
     const customRoomId = generateRoomId();
     
-    // 获取当前服务器配置
-    const serverConfig = getCurrentPeerServer();
+    // 由于我们只有一个服务器选项，简化连接逻辑
+    const serverConfig = peerServerOptions[0];
+    currentServerIndex = 0; // 确保使用第一个(也是唯一的)服务器
     
     // 更新服务器状态指示器
-    for (let i = 0; i < peerServerOptions.length; i++) {
-        if (i < currentServerIndex) {
-            updateServerStatus(i, 'failed');
-        } else if (i === currentServerIndex) {
-            updateServerStatus(i, 'connecting');
-        }
-    }
+    updateServerStatus(0, 'connecting');
     
     showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`);
     
     // 初始化PeerJS连接，使用自定义ID
     peer = new Peer(customRoomId, {
-        debug: 2,
+        debug: 3, // 提高调试级别
         config: {
             'iceServers': getStunServers()
         },
@@ -102,21 +97,13 @@ function tryCreateRoom() {
         }
         
         // 更新服务器状态
-        updateServerStatus(currentServerIndex, 'failed');
+        updateServerStatus(0, 'failed');
         
-        // 如果还有其他服务器可尝试
-        if (currentServerIndex < peerServerOptions.length - 1) {
-            showSystemMessage(`当前服务器连接超时，尝试下一个服务器...`);
-            getNextPeerServer();
-            tryCreateRoom();
-        } else {
-            // 所有服务器都尝试失败
-            resetPeerServerIndex();
-            showSystemMessage('创建房间失败，所有服务器均无法连接');
-            alert('创建房间失败，请检查网络连接或稍后重试');
-            showScreen('host-setup-screen');
-        }
-    }, 10000); // 10秒超时
+        resetPeerServerIndex();
+        showSystemMessage('创建房间失败，服务器连接超时');
+        alert('创建房间失败，请检查网络连接或稍后重试');
+        showScreen('host-setup-screen');
+    }, 15000); // 15秒超时
     
     peer.on('open', (id) => {
         clearTimeout(peerTimeout);
@@ -124,7 +111,7 @@ function tryCreateRoom() {
         peerId = id;
         
         // 更新服务器状态
-        updateServerStatus(currentServerIndex, 'connected');
+        updateServerStatus(0, 'connected');
         
         // 设置房间ID显示
         const roomIdDisplay = document.getElementById('room-id-display');
@@ -163,6 +150,9 @@ function tryCreateRoom() {
         
         // 更新连接状态
         updateConnectionStatus('connected', true);
+        
+        // 设置连接事件监听
+        setupPeerEvents();
     });
     
     peer.on('error', (err) => {
@@ -170,7 +160,7 @@ function tryCreateRoom() {
         console.error('PeerJS error:', err);
         
         // 更新服务器状态
-        updateServerStatus(currentServerIndex, 'failed');
+        updateServerStatus(0, 'failed');
         
         // 检查是否是ID已被占用错误
         if (err.type === 'unavailable-id') {
@@ -179,21 +169,11 @@ function tryCreateRoom() {
             return;
         }
         
-        // 检查是否是服务器连接错误
-        if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
-            // 如果还有其他服务器可尝试
-            if (currentServerIndex < peerServerOptions.length - 1) {
-                showSystemMessage(`服务器连接失败，尝试下一个服务器...`);
-                getNextPeerServer();
-                tryCreateRoom();
-            } else {
-                // 所有服务器都尝试失败
-                resetPeerServerIndex();
-                showSystemMessage('创建房间失败，所有服务器均无法连接');
-                alert('创建房间失败，请检查网络连接或稍后重试');
-                showScreen('host-setup-screen');
-            }
-        }
+        // 其他类型错误
+        resetPeerServerIndex();
+        showSystemMessage(`创建房间失败: ${err.type}`);
+        alert('创建房间失败，请检查网络连接或稍后重试');
+        showScreen('host-setup-screen');
     });
 }
 

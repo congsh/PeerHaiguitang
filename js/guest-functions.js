@@ -56,9 +56,6 @@ function tryJoinRoom(roomId) {
         }
     }
     
-    // 更新连接状态
-    updateConnectionStatus('connecting', '连接服务器中...', 'connection-status');
-    
     showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`, 'guest-chat-messages');
     
     try {
@@ -82,152 +79,235 @@ function tryJoinRoom(roomId) {
             key: serverConfig.key
         });
         
-        // 连接成功事件
-        peer.on('open', id => {
+        // 设置PeerJS连接超时
+        const peerTimeout = setTimeout(() => {
+            if (peer && !peerId) {
+                if (peer) {
+                    peer.destroy();
+                    peer = null;
+                }
+                
+                // 更新服务器状态
+                updateServerStatus(currentServerIndex, 'failed');
+                
+                // 如果还有其他服务器可尝试
+                if (currentServerIndex < peerServerOptions.length - 1) {
+                    showSystemMessage(`当前服务器连接超时，尝试下一个服务器...`, 'guest-chat-messages');
+                    getNextPeerServer();
+                    tryJoinRoom(roomId);
+                } else {
+                    // 所有服务器都尝试失败
+                    resetPeerServerIndex();
+                    showSystemMessage('连接失败，所有服务器均无法连接', 'guest-chat-messages');
+                    alert('连接失败，请检查网络连接或稍后重试');
+                    showScreen('guest-setup-screen');
+                }
+            }
+        }, 10000); // 10秒超时
+        
+        // 设置PeerJS事件监听
+        peer.on('open', (myPeerId) => {
+            clearTimeout(peerTimeout);
+            console.log('My peer ID is:', myPeerId);
+            peerId = myPeerId;
+            
             // 更新服务器状态
             updateServerStatus(currentServerIndex, 'connected');
             
-            showSystemMessage(`已连接到服务器，正在尝试加入房间...`, 'guest-chat-messages');
+            showSystemMessage(`已连接到服务器: ${serverConfig.host}`, 'guest-chat-messages');
+            showSystemMessage(`正在连接到房间: ${roomId}...`, 'guest-chat-messages');
             
-            // 连接到主持人
-            connectToHost(roomId);
+            try {
+                // 连接到主持人
+                hostConnection = peer.connect(roomId, {
+                    metadata: {
+                        name: userName
+                    },
+                    reliable: true
+                });
+                
+                if (!hostConnection) {
+                    throw new Error('无法创建连接');
+                }
+                
+                // 设置连接超时
+                const connectionTimeout = setTimeout(() => {
+                    if (hostConnection && !hostConnection.open) {
+                        // 如果还有其他服务器可尝试
+                        if (currentServerIndex < peerServerOptions.length - 1) {
+                            showSystemMessage(`房间连接超时，尝试下一个服务器...`, 'guest-chat-messages');
+                            getNextPeerServer();
+                            tryJoinRoom(roomId);
+                        } else {
+                            // 所有服务器都尝试失败
+                            resetPeerServerIndex();
+                            showSystemMessage('连接超时，请检查房间ID是否正确', 'guest-chat-messages');
+                            alert('连接超时，请检查房间ID是否正确');
+                            resetState();
+                            showScreen('guest-setup-screen');
+                        }
+                    }
+                }, 8000); // 8秒超时
+                
+                hostConnection.on('open', () => {
+                    clearTimeout(connectionTimeout);
+                    console.log('Connected to host');
+                    updateConnectionStatus('connected', false);
+                    
+                    // 发送加入请求
+                    hostConnection.send({
+                        type: 'join-request',
+                        name: userName,
+                        peerId: myPeerId
+                    });
+                    
+                    // 显示欢迎消息
+                    showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
+                });
+                
+                hostConnection.on('data', handleHostData);
+                
+                hostConnection.on('close', () => {
+                    console.log('Connection to host closed');
+                    updateConnectionStatus('disconnected', false);
+                    showSystemMessage('与主持人的连接已关闭', 'guest-chat-messages');
+                    
+                    // 返回欢迎界面
+                    setTimeout(() => {
+                        alert('房间已关闭或主持人已离开');
+                        showScreen('welcome-screen');
+                    }, 1000);
+                });
+                
+                hostConnection.on('error', (err) => {
+                    console.error('Connection to host error:', err);
+                    updateConnectionStatus('disconnected', false);
+                    showSystemMessage(`连接错误: ${err}`, 'guest-chat-messages');
+                    
+                    setTimeout(() => {
+                        alert('连接错误，请检查房间ID后重试');
+                        showScreen('guest-setup-screen');
+                    }, 1000);
+                });
+            } catch (error) {
+                console.error('Failed to establish connection:', error);
+                showSystemMessage(`连接错误: ${error.message}`, 'guest-chat-messages');
+                updateConnectionStatus('disconnected', false);
+                
+                setTimeout(() => {
+                    alert(`连接错误: ${error.message}`);
+                    showScreen('guest-setup-screen');
+                }, 1000);
+            }
         });
         
-        // 连接错误事件
-        peer.on('error', error => {
-            console.error('PeerJS 错误:', error);
+        peer.on('error', (err) => {
+            clearTimeout(peerTimeout);
+            console.error('PeerJS error:', err);
             
             // 更新服务器状态
             updateServerStatus(currentServerIndex, 'failed');
             
-            if (error.type === 'network' || error.type === 'server-error' || error.type === 'socket-error') {
-                // 网络/服务器错误，尝试下一个服务器
-                showSystemMessage(`服务器 ${serverConfig.host} 连接失败，正在尝试其他服务器...`, 'guest-chat-messages');
+            if (err.type === 'peer-unavailable') {
+                showSystemMessage('找不到指定的房间，请检查房间ID是否正确', 'guest-chat-messages');
                 
-                // 尝试下一个服务器
-                currentServerIndex = (currentServerIndex + 1) % peerServerOptions.length;
-                tryJoinRoom(roomId);
-            } else if (error.type === 'peer-unavailable') {
-                // 房间不存在
-                updateConnectionStatus('disconnected', '房间不存在', 'connection-status');
-                showSystemMessage(`房间 ${roomId} 不存在或已关闭，请检查房间ID`, 'guest-chat-messages');
-            } else {
-                // 其他错误
-                updateConnectionStatus('disconnected', '连接失败', 'connection-status');
-                showSystemMessage(`连接错误: ${error.type}`, 'guest-chat-messages');
+                // 如果还有其他服务器可尝试
+                if (currentServerIndex < peerServerOptions.length - 1) {
+                    showSystemMessage(`尝试使用下一个服务器...`, 'guest-chat-messages');
+                    getNextPeerServer();
+                    tryJoinRoom(roomId);
+                } else {
+                    // 所有服务器都尝试失败
+                    resetPeerServerIndex();
+                    setTimeout(() => {
+                        alert('找不到指定的房间，请检查房间ID后重试');
+                        showScreen('guest-setup-screen');
+                    }, 1000);
+                }
+                return;
             }
-        });
-        
-        // 连接断开事件
-        peer.on('disconnected', () => {
-            updateConnectionStatus('disconnected', '已断开', 'connection-status');
-            showSystemMessage('与服务器的连接已断开，尝试重新连接...', 'guest-chat-messages');
             
-            // 尝试重新连接
-            peer.reconnect();
+            if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+                // 如果还有其他服务器可尝试
+                if (currentServerIndex < peerServerOptions.length - 1) {
+                    showSystemMessage(`服务器连接失败，尝试下一个服务器...`, 'guest-chat-messages');
+                    getNextPeerServer();
+                    tryJoinRoom(roomId);
+                } else {
+                    // 所有服务器都尝试失败
+                    resetPeerServerIndex();
+                    showSystemMessage('连接失败，所有服务器均无法连接', 'guest-chat-messages');
+                    setTimeout(() => {
+                        alert('连接失败，请检查网络连接或稍后重试');
+                        showScreen('guest-setup-screen');
+                    }, 1000);
+                }
+                return;
+            }
+            
+            // 其他错误
+            showSystemMessage(`连接错误: ${err.type}`, 'guest-chat-messages');
+            setTimeout(() => {
+                alert(`连接错误: ${err.type}`);
+                showScreen('guest-setup-screen');
+            }, 1000);
         });
-        
     } catch (error) {
-        console.error('初始化PeerJS失败:', error);
-        showSystemMessage(`初始化连接失败: ${error.message}`, 'guest-chat-messages');
+        console.error('Setup error:', error);
+        showSystemMessage(`设置错误: ${error.message}`, 'guest-chat-messages');
+        updateConnectionStatus('disconnected', false);
+        
+        setTimeout(() => {
+            alert(`设置错误: ${error.message}`);
+            showScreen('guest-setup-screen');
+        }, 1000);
     }
 }
 
 /**
- * 连接到主持人
- * @param {string} hostId - 主持人的PeerJS ID
- */
-function connectToHost(hostId) {
-    // 更新连接状态
-    updateConnectionStatus('connecting', '连接房间中...', 'connection-status');
-    
-    // 建立到主持人的连接
-    conn = peer.connect(hostId, {
-        reliable: true,
-        metadata: {
-            name: guestName,
-            type: 'guest'
-        }
-    });
-    
-    // 连接打开事件
-    conn.on('open', () => {
-        // 更新连接状态
-        updateConnectionStatus('connected', '已连接', 'connection-status');
-        
-        // 发送加入消息
-        conn.send({
-            type: 'join',
-            name: guestName
-        });
-        
-        showSystemMessage(`成功连接到房间 ${hostId}`, 'guest-chat-messages');
-    });
-    
-    // 连接错误事件
-    conn.on('error', error => {
-        console.error('连接错误:', error);
-        updateConnectionStatus('disconnected', '连接失败', 'connection-status');
-        showSystemMessage(`连接错误: ${error.message || '未知错误'}`, 'guest-chat-messages');
-    });
-    
-    // 连接关闭事件
-    conn.on('close', () => {
-        updateConnectionStatus('disconnected', '已断开', 'connection-status');
-        showSystemMessage('与主持人的连接已断开', 'guest-chat-messages');
-    });
-    
-    // 收到数据事件
-    conn.on('data', data => {
-        handleGuestReceivedData(data);
-    });
-}
-
-/**
  * 处理来自主持人的数据
- * @param {Object} data - 接收到的数据
+ * @param {Object} data - 主持人发送的数据
  */
 function handleHostData(data) {
     console.log('Received data from host:', data);
     
     switch (data.type) {
         case 'room-info':
-            // 接收房间信息
+            // 处理房间信息
             handleRoomInfo(data);
+            break;
+            
+        case 'join-confirmed':
+            // 处理加入确认
+            showSystemMessage('主持人已确认你的加入请求', 'guest-chat-messages');
+            showScreen('guest-room-screen');
+            document.getElementById('guest-room-name').textContent = `房间: ${data.roomName}`;
             break;
             
         case 'participants-update':
             // 更新参与者列表
             participants = data.participants;
-            updateGuestParticipantsList();
+            updateParticipantsList('guest-participants-list');
             break;
             
         case 'puzzle':
             // 接收谜题
-            document.getElementById('puzzle-display').textContent = data.content;
+            document.getElementById('guest-puzzle-display').textContent = data.content;
             showSystemMessage('主持人发布了新谜题', 'guest-chat-messages');
             break;
             
         case 'intel':
             // 接收情报
-            const intelDisplay = document.getElementById('intel-display');
-            intelDisplay.textContent = data.content;
+            const intelDisplay = document.getElementById('guest-intel-display');
+            intelDisplay.textContent = intelDisplay.textContent 
+                ? intelDisplay.textContent + '\n\n' + data.content 
+                : data.content;
             showSystemMessage('主持人发布了新情报', 'guest-chat-messages');
             break;
             
         case 'host-response':
-            // 接收主持人回应
+            // 处理主持人回应
             handleHostResponse(data);
-            break;
-            
-        case 'game-end':
-            // 游戏结束
-            showSystemMessage('游戏已结束', 'guest-chat-messages');
-            break;
-            
-        case 'game-continue':
-            // 游戏继续
-            showSystemMessage('游戏继续', 'guest-chat-messages');
             break;
             
         case 'question-from-other':
@@ -235,8 +315,20 @@ function handleHostData(data) {
             showChatMessage(data.sender, data.question, 'guest', 'guest-chat-messages');
             break;
             
+        case 'game-end':
+            // 游戏结束
+            showSystemMessage('主持人结束了游戏', 'guest-chat-messages');
+            gameStarted = false;
+            break;
+            
+        case 'game-continue':
+            // 游戏继续
+            showSystemMessage('主持人继续了游戏', 'guest-chat-messages');
+            gameStarted = true;
+            break;
+            
         case 'reaction':
-            // 收到反应
+            // 处理其他参与者的反应
             showSystemMessage(`${data.sender} ${data.reaction === '🌹' ? '送出了一朵鲜花' : '丢了一个垃圾'}`, 'guest-chat-messages');
             break;
     }
@@ -254,97 +346,107 @@ function handleRoomInfo(data) {
     // 更新房间名称显示
     document.getElementById('guest-room-name').textContent = `房间: ${roomName}`;
     
-    // 更新主持人信息显示
-    const hostInfo = Object.values(participants).find(p => p.isHost);
-    if (hostInfo) {
-        document.getElementById('host-info-display').textContent = hostInfo.name;
-    }
-    
     // 更新参与者列表
-    updateGuestParticipantsList();
+    updateParticipantsList('guest-participants-list');
     
     // 更新规则列表
     updateGuestRulesList();
     
-    // 设置举手按钮显示
-    if (roomRules.answerMethod === 'raise-hand') {
-        document.getElementById('raise-hand-btn').style.display = 'block';
-    } else {
-        document.getElementById('raise-hand-btn').style.display = 'none';
-    }
+    // 显示欢迎消息
+    showSystemMessage(`欢迎加入房间 "${roomName}"`, 'guest-chat-messages');
+    showSystemMessage(`主持人: ${data.hostName}`, 'guest-chat-messages');
     
-    // 设置反应按钮显示
-    if (roomRules.interactionMethod === 'enabled') {
-        document.getElementById('reaction-buttons').style.display = 'flex';
-    } else {
-        document.getElementById('reaction-buttons').style.display = 'none';
-    }
-    
-    showSystemMessage(`已加入房间 "${roomName}"`, 'guest-chat-messages');
+    // 加载笔记
+    loadNotes();
 }
 
 /**
- * 更新参与者列表显示（参与者视角）
+ * 更新参与者规则列表显示
  */
-function updateGuestParticipantsList() {
-    const participantsList = document.getElementById('guest-participants-list');
-    participantsList.innerHTML = '';
+function updateGuestRulesList() {
+    const list = document.getElementById('guest-rules-list');
+    if (!list) return;
     
-    Object.keys(participants).forEach(pid => {
-        const participant = participants[pid];
-        
-        const li = document.createElement('li');
-        li.innerHTML = `${participant.name} ${participant.isHost ? '(主持人)' : ''}`;
-        
-        if (participant.raisedHand) {
-            const handIcon = document.createElement('span');
-            handIcon.textContent = ' ✋';
-            handIcon.title = '已举手';
-            li.appendChild(handIcon);
-        }
-        
-        participantsList.appendChild(li);
+    // 清空列表
+    list.innerHTML = '';
+    
+    // 添加规则
+    const rules = [
+        { name: '汤类型', value: getSoupTypeName(roomRules.soupType) },
+        { name: '计分方式', value: getScoringMethodName(roomRules.scoringMethod) },
+        { name: '答题方式', value: getAnswerMethodName(roomRules.answerMethod) },
+        { name: '互动方式', value: getInteractionMethodName(roomRules.interactionMethod) }
+    ];
+    
+    rules.forEach(rule => {
+        const item = document.createElement('div');
+        item.className = 'rule-item';
+        item.innerHTML = `
+            <span class="rule-name">${rule.name}</span>
+            <span class="rule-value">${rule.value}</span>
+        `;
+        list.appendChild(item);
     });
 }
 
 /**
- * 更新规则列表显示（参与者视角）
+ * 获取汤类型名称
+ * @param {string} type - 汤类型代码
+ * @returns {string} 汤类型名称
  */
-function updateGuestRulesList() {
-    const rulesList = document.getElementById('guest-rules-list');
-    rulesList.innerHTML = '';
-    
-    // 添加汤类型
-    const soupTypeLi = document.createElement('li');
-    soupTypeLi.textContent = `汤类型: ${roomRules.soupType === 'red' ? '红汤' : '普通汤'}`;
-    rulesList.appendChild(soupTypeLi);
-    
-    // 添加打分方式
-    const scoringMethodLi = document.createElement('li');
-    let scoringText = '';
-    switch (roomRules.scoringMethod) {
-        case 'host':
-            scoringText = '仅主持人打分';
-            break;
-        case 'all':
-            scoringText = '所有人打分';
-            break;
-        case 'none':
-            scoringText = '不打分';
-            break;
+function getSoupTypeName(type) {
+    switch (type) {
+        case 'classic': return '经典海龟汤';
+        case 'crime': return '犯罪推理';
+        case 'fantasy': return '奇幻冒险';
+        case 'scifi': return '科幻故事';
+        case 'horror': return '恐怖故事';
+        case 'custom': return '自定义';
+        default: return '未知';
     }
-    scoringMethodLi.textContent = `打分方式: ${scoringText}`;
-    rulesList.appendChild(scoringMethodLi);
-    
-    // 添加回答方式
-    const answerMethodLi = document.createElement('li');
-    answerMethodLi.textContent = `回答方式: ${roomRules.answerMethod === 'raise-hand' ? '举手回答' : '自由回答'}`;
-    rulesList.appendChild(answerMethodLi);
-    
-    // 添加互动方式
-    const interactionMethodLi = document.createElement('li');
-    interactionMethodLi.textContent = `互动方式: ${roomRules.interactionMethod === 'enabled' ? '允许丢鲜花和垃圾' : '不允许丢鲜花和垃圾'}`;
-    rulesList.appendChild(interactionMethodLi);
+}
+
+/**
+ * 获取计分方式名称
+ * @param {string} method - 计分方式代码
+ * @returns {string} 计分方式名称
+ */
+function getScoringMethodName(method) {
+    switch (method) {
+        case 'none': return '不计分';
+        case 'time': return '按时间计分';
+        case 'questions': return '按问题数计分';
+        case 'custom': return '自定义计分';
+        default: return '未知';
+    }
+}
+
+/**
+ * 获取答题方式名称
+ * @param {string} method - 答题方式代码
+ * @returns {string} 答题方式名称
+ */
+function getAnswerMethodName(method) {
+    switch (method) {
+        case 'host': return '只有主持人可以解谜';
+        case 'anyone': return '任何人都可以提交答案';
+        case 'vote': return '投票决定正确答案';
+        default: return '未知';
+    }
+}
+
+/**
+ * 获取互动方式名称
+ * @param {string} method - 互动方式代码
+ * @returns {string} 互动方式名称
+ */
+function getInteractionMethodName(method) {
+    switch (method) {
+        case 'enabled': return '允许举手和反应';
+        case 'handsonly': return '只允许举手';
+        case 'disabled': return '禁止互动';
+        default: return '未知';
+    }
 }
 
 /**
@@ -352,84 +454,93 @@ function updateGuestRulesList() {
  * @param {Object} data - 主持人回应数据
  */
 function handleHostResponse(data) {
-    const hostInfo = Object.values(participants).find(p => p.isHost);
-    const hostName = hostInfo ? hostInfo.name : '主持人';
-    
-    showChatMessage(hostName, data.response, 'host', 'guest-chat-messages');
-    
-    // 如果是"是"的回答，可以添加到笔记中
-    if (data.response === '是') {
-        const notesTextarea = document.getElementById('personal-notes');
-        const lastQuestion = document.querySelector('#guest-chat-messages .message.guest:last-of-type .content');
-        
-        if (lastQuestion) {
-            const noteText = `问题: ${lastQuestion.textContent}\n回答: 是\n\n`;
-            notesTextarea.value += noteText;
-            
-            // 保存笔记
-            saveNotes();
-        }
-    }
+    // 显示主持人回应
+    showChatMessage('主持人', data.response, 'host', 'guest-chat-messages');
 }
 
 /**
  * 发送问题
  */
 function sendQuestion() {
+    if (!hostConnection || !hostConnection.open) {
+        alert('与主持人的连接已断开');
+        return;
+    }
+    
     const questionInput = document.getElementById('question-input');
     const question = questionInput.value.trim();
     
     if (!question) {
+        alert('请输入问题内容');
         return;
     }
     
-    // 检查是否需要举手
-    if (roomRules.answerMethod === 'raise-hand' && !participants[peerId].raisedHand) {
-        alert('请先举手再提问');
-        return;
-    }
-    
-    // 发送问题给主持人
+    // 发送问题
     hostConnection.send({
         type: 'question',
         question: question
     });
     
     // 显示自己的问题
-    showChatMessage(userName, question, 'guest', 'guest-chat-messages');
+    showChatMessage(userName, question, 'self', 'guest-chat-messages');
     
     // 清空输入框
     questionInput.value = '';
     
-    // 如果已举手，提问后取消举手状态
-    if (participants[peerId] && participants[peerId].raisedHand) {
-        participants[peerId].raisedHand = false;
+    // 如果有举手状态，则放下手
+    if (raisedHands.includes(peerId)) {
         hostConnection.send({
             type: 'lower-hand'
         });
+        
+        const raiseHandBtn = document.getElementById('raise-hand-btn');
+        if (raiseHandBtn) {
+            raiseHandBtn.textContent = '举手';
+            raiseHandBtn.classList.remove('active');
+        }
     }
 }
 
 /**
- * 举手
+ * 举手/放下手
  */
 function raiseHand() {
-    if (!participants[peerId]) return;
+    if (!hostConnection || !hostConnection.open) {
+        alert('与主持人的连接已断开');
+        return;
+    }
     
-    if (participants[peerId].raisedHand) {
-        // 如果已经举手，则放下手
-        participants[peerId].raisedHand = false;
+    const raiseHandBtn = document.getElementById('raise-hand-btn');
+    
+    if (raisedHands.includes(peerId)) {
+        // 放下手
         hostConnection.send({
             type: 'lower-hand'
         });
-        document.getElementById('raise-hand-btn').textContent = '举手';
+        
+        if (raiseHandBtn) {
+            raiseHandBtn.textContent = '举手';
+            raiseHandBtn.classList.remove('active');
+        }
+        
+        // 从举手列表中移除
+        const index = raisedHands.indexOf(peerId);
+        if (index > -1) {
+            raisedHands.splice(index, 1);
+        }
     } else {
-        // 如果没有举手，则举手
-        participants[peerId].raisedHand = true;
+        // 举手
         hostConnection.send({
             type: 'raise-hand'
         });
-        document.getElementById('raise-hand-btn').textContent = '放下手';
+        
+        if (raiseHandBtn) {
+            raiseHandBtn.textContent = '放下手';
+            raiseHandBtn.classList.add('active');
+        }
+        
+        // 添加到举手列表
+        raisedHands.push(peerId);
     }
 }
 
@@ -438,400 +549,23 @@ function raiseHand() {
  * @param {string} reaction - 反应类型
  */
 function sendReaction(reaction) {
-    if (roomRules.interactionMethod !== 'enabled') {
+    if (!hostConnection || !hostConnection.open) {
+        alert('与主持人的连接已断开');
         return;
     }
     
+    // 检查是否允许互动
+    if (roomRules.interactionMethod !== 'enabled') {
+        alert('当前房间设置不允许发送反应');
+        return;
+    }
+    
+    // 发送反应
     hostConnection.send({
         type: 'reaction',
         reaction: reaction
     });
     
+    // 显示本地反应消息
     showSystemMessage(`你${reaction === '🌹' ? '送出了一朵鲜花' : '丢了一个垃圾'}`, 'guest-chat-messages');
-}
-
-/**
- * 保存笔记
- */
-function saveNotes() {
-    const notesTextarea = document.getElementById('personal-notes');
-    if (notesTextarea) {
-        notes = notesTextarea.value;
-        localStorage.setItem('haiguitang-notes', notes);
-    }
-}
-
-/**
- * 加载笔记
- */
-function loadNotes() {
-    const notesTextarea = document.getElementById('personal-notes');
-    if (notesTextarea) {
-        const savedNotes = localStorage.getItem('haiguitang-notes');
-        if (savedNotes) {
-            notesTextarea.value = savedNotes;
-            notes = savedNotes;
-        }
-    }
-}
-
-// 全局变量
-let peer = null;
-let conn = null;
-let currentServerIndex = 0;
-let guestName = '';
-let roomId = '';
-let participants = {};
-let hostName = '';
-let isHandRaised = false;
-
-/**
- * 从参与者身份加入房间
- */
-function joinRoomAsGuest() {
-    // 获取参与者名称和房间ID
-    guestName = document.getElementById('guest-name').value.trim();
-    roomId = document.getElementById('room-id').value.trim().toUpperCase();
-    
-    if (!guestName) {
-        alert('请输入您的名称');
-        return;
-    }
-    
-    if (!roomId) {
-        alert('请输入房间ID');
-        return;
-    }
-    
-    // 验证房间ID格式
-    if (!isValidRoomId(roomId)) {
-        alert('房间ID格式不正确，应为4-10位字母和数字');
-        return;
-    }
-    
-    // 切换到参与者页面
-    showGuestPage();
-    
-    // 显示房间ID
-    document.getElementById('guest-room-id-display').textContent = roomId;
-    
-    // 尝试加入房间
-    tryJoinRoom(roomId);
-    
-    // 绑定参与者页面事件
-    initGuestEvents();
-}
-
-/**
- * 验证房间ID格式
- * @param {string} id - 要验证的房间ID
- * @returns {boolean} 是否有效
- */
-function isValidRoomId(id) {
-    return /^[A-Z0-9]{4,10}$/.test(id);
-}
-
-/**
- * 初始化参与者页面事件
- */
-function initGuestEvents() {
-    // 发送消息
-    document.getElementById('guest-send-message-btn').addEventListener('click', sendGuestMessage);
-    document.getElementById('guest-chat-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendGuestMessage();
-        }
-    });
-    
-    // 举手按钮
-    document.getElementById('raise-hand-btn').addEventListener('click', toggleRaiseHand);
-    
-    // 保存和清除笔记
-    document.getElementById('save-notes-btn').addEventListener('click', saveNotes);
-    document.getElementById('clear-notes-btn').addEventListener('click', clearNotes);
-}
-
-/**
- * 发送参与者消息
- */
-function sendGuestMessage() {
-    const chatInput = document.getElementById('guest-chat-input');
-    const message = chatInput.value.trim();
-    
-    if (!message) return;
-    
-    // 检查连接状态
-    if (!conn || !conn.open) {
-        showSystemMessage('连接已断开，无法发送消息', 'guest-chat-messages');
-        return;
-    }
-    
-    // 在本地显示消息
-    addChatMessage(message, guestName, 'guest', 'guest-chat-messages');
-    
-    // 发送消息给主持人
-    conn.send({
-        type: 'chat',
-        sender: guestName,
-        message: message
-    });
-    
-    // 清空输入框
-    chatInput.value = '';
-}
-
-/**
- * 切换举手状态
- */
-function toggleRaiseHand() {
-    const raiseHandBtn = document.getElementById('raise-hand-btn');
-    
-    // 切换举手状态
-    isHandRaised = !isHandRaised;
-    
-    if (isHandRaised) {
-        // 更新按钮样式
-        raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 取消举手';
-        raiseHandBtn.classList.add('btn-danger');
-        
-        // 发送举手消息
-        conn.send({
-            type: 'raise-hand',
-            name: guestName
-        });
-        
-        // 显示系统消息
-        showSystemMessage('您已举手，等待主持人回应', 'guest-chat-messages');
-    } else {
-        // 更新按钮样式
-        raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 举手';
-        raiseHandBtn.classList.remove('btn-danger');
-        
-        // 发送取消举手消息
-        conn.send({
-            type: 'cancel-raise-hand',
-            name: guestName
-        });
-        
-        // 显示系统消息
-        showSystemMessage('您已取消举手', 'guest-chat-messages');
-    }
-}
-
-/**
- * 保存笔记
- */
-function saveNotes() {
-    const notes = document.getElementById('personal-notes').value;
-    localStorage.setItem('haiguitang_notes_' + roomId, notes);
-    showSystemMessage('笔记已保存', 'guest-chat-messages');
-}
-
-/**
- * 清除笔记
- */
-function clearNotes() {
-    if (confirm('确定要清除所有笔记吗？')) {
-        document.getElementById('personal-notes').value = '';
-        localStorage.removeItem('haiguitang_notes_' + roomId);
-        showSystemMessage('笔记已清除', 'guest-chat-messages');
-    }
-}
-
-/**
- * 处理收到的消息
- * @param {Object} data - 消息数据
- */
-function handleGuestReceivedData(data) {
-    console.log('参与者收到消息:', data);
-    
-    switch (data.type) {
-        case 'welcome':
-            // 欢迎消息
-            handleWelcomeMessage(data);
-            break;
-        case 'chat':
-            // 聊天消息
-            addChatMessage(data.message, data.sender, 'host', 'guest-chat-messages');
-            break;
-        case 'rules':
-            // 规则更新
-            handleRulesUpdate(data);
-            break;
-        case 'puzzle':
-            // 题目更新
-            handlePuzzleUpdate(data);
-            break;
-        case 'clear-puzzle':
-            // 清除题目
-            handleClearPuzzle();
-            break;
-        case 'host-response':
-            // 主持人回应
-            handleHostResponse(data);
-            break;
-        case 'participant-update':
-            // 参与者列表更新
-            handleParticipantUpdate(data);
-            break;
-        default:
-            console.log('未知消息类型:', data.type);
-    }
-}
-
-/**
- * 处理欢迎消息
- * @param {Object} data - 欢迎消息数据
- */
-function handleWelcomeMessage(data) {
-    hostName = data.host;
-    
-    // 更新连接状态
-    showSystemMessage(`成功连接到主持人 ${hostName} 的房间`, 'guest-chat-messages');
-    
-    // 加载保存的笔记
-    const savedNotes = localStorage.getItem('haiguitang_notes_' + roomId);
-    if (savedNotes) {
-        document.getElementById('personal-notes').value = savedNotes;
-    }
-}
-
-/**
- * 处理规则更新
- * @param {Object} data - 规则数据
- */
-function handleRulesUpdate(data) {
-    const rulesContainer = document.getElementById('guest-rules');
-    rulesContainer.innerHTML = data.content.replace(/\n/g, '<br>');
-    
-    showSystemMessage('主持人更新了游戏规则', 'guest-chat-messages');
-}
-
-/**
- * 处理题目更新
- * @param {Object} data - 题目数据
- */
-function handlePuzzleUpdate(data) {
-    document.getElementById('puzzle-title-display').textContent = data.title;
-    document.getElementById('puzzle-content-display').innerHTML = data.content.replace(/\n/g, '<br>');
-    
-    showSystemMessage('主持人发布了新题目', 'guest-chat-messages');
-}
-
-/**
- * 处理清除题目
- */
-function handleClearPuzzle() {
-    document.getElementById('puzzle-title-display').textContent = '等待主持人设置题目...';
-    document.getElementById('puzzle-content-display').textContent = '主持人尚未设置题目，请耐心等待。';
-    
-    showSystemMessage('主持人清除了题目', 'guest-chat-messages');
-}
-
-/**
- * 处理主持人回应
- * @param {Object} data - 回应数据
- */
-function handleHostResponse(data) {
-    // 更新举手状态
-    isHandRaised = false;
-    
-    // 更新按钮样式
-    const raiseHandBtn = document.getElementById('raise-hand-btn');
-    raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 举手';
-    raiseHandBtn.classList.remove('btn-danger');
-    
-    // 显示系统消息
-    showSystemMessage(`主持人回应: ${data.message}`, 'guest-chat-messages');
-}
-
-/**
- * 处理参与者列表更新
- * @param {Object} data - 参与者列表数据
- */
-function handleParticipantUpdate(data) {
-    participants = {};
-    
-    // 更新参与者列表
-    data.participants.forEach(p => {
-        participants[p.id] = {
-            name: p.name,
-            status: p.status
-        };
-    });
-    
-    // 更新UI
-    updateGuestParticipantsList();
-}
-
-/**
- * 更新参与者列表UI
- */
-function updateGuestParticipantsList() {
-    const participantsList = document.getElementById('guest-participants-list');
-    const participantCount = document.getElementById('guest-participant-count');
-    
-    // 清空列表
-    participantsList.innerHTML = '';
-    
-    // 添加主持人
-    const hostItem = document.createElement('li');
-    hostItem.className = 'participant-item';
-    
-    // 创建头像
-    const hostAvatar = document.createElement('div');
-    hostAvatar.className = 'participant-avatar';
-    hostAvatar.style.backgroundColor = '#e74c3c';
-    hostAvatar.textContent = hostName.charAt(0).toUpperCase();
-    
-    // 创建名称
-    const hostNameElement = document.createElement('div');
-    hostNameElement.className = 'participant-name';
-    hostNameElement.textContent = `${hostName} (主持人)`;
-    
-    hostItem.appendChild(hostAvatar);
-    hostItem.appendChild(hostNameElement);
-    participantsList.appendChild(hostItem);
-    
-    // 计算参与者数量（包括主持人）
-    const count = Object.keys(participants).length + 1;
-    participantCount.textContent = count;
-    
-    // 添加其他参与者
-    for (const peerId in participants) {
-        const participant = participants[peerId];
-        const listItem = document.createElement('li');
-        listItem.className = 'participant-item';
-        
-        // 创建头像
-        const avatar = document.createElement('div');
-        avatar.className = 'participant-avatar';
-        avatar.textContent = participant.name.charAt(0).toUpperCase();
-        
-        // 创建名称
-        const name = document.createElement('div');
-        name.className = 'participant-name';
-        name.textContent = participant.name;
-        
-        // 创建状态
-        const status = document.createElement('div');
-        status.className = 'participant-status';
-        
-        if (participant.status === 'raised-hand') {
-            status.textContent = '举手中';
-            status.classList.add('status-raised-hand');
-        } else {
-            status.textContent = '在线';
-            status.classList.add('status-online');
-        }
-        
-        // 添加到列表项
-        listItem.appendChild(avatar);
-        listItem.appendChild(name);
-        listItem.appendChild(status);
-        
-        // 添加到列表
-        participantsList.appendChild(listItem);
-    }
 } 

@@ -60,6 +60,8 @@ function handleGuestMessage(data, conn) {
  * @param {DataConnection} conn - 与参与者的连接
  */
 function handleJoinRequest(data, conn) {
+    console.log('收到加入请求:', data);
+    
     // 添加到参与者列表
     participants[conn.peer] = {
         name: data.name,
@@ -73,8 +75,17 @@ function handleJoinRequest(data, conn) {
     // 发送系统消息
     showSystemMessage(`${data.name} 加入了房间`);
     
+    // 发送确认消息回参与者
+    conn.send({
+        type: 'join-confirmed',
+        roomName: roomName,
+        hostName: userName
+    });
+    
     // 广播参与者列表更新
     broadcastParticipants();
+    
+    console.log('已处理加入请求，当前参与者:', participants);
 }
 
 /**

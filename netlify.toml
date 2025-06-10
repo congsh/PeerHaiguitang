@@ -2,7 +2,21 @@
   publish = "."
   command = "echo 'No build command needed for static site'"
 
-# 重定向所有请求到 index.html 以支持单页应用
+[dev]
+  functions = "netlify/functions"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# API 代理规则，必须放在SPA重定向规则之前
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+# 重定向所有其他请求到 index.html 以支持单页应用
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -24,25 +38,6 @@
   for = "*.css"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-[[redirects]]
-  from = "/peerjs/*"
-  to = "https://0.peerjs.com/:splat"
-  status = 200
-  force = true
-
-[dev]
-  functions = "netlify/functions"
-
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-  force = true
 
 [[headers]]
   for = "/*"

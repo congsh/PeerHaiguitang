@@ -43,10 +43,10 @@ function createRoom() {
     
     // 获取房间规则
     roomRules = {
-        soupType: document.querySelector('input[name="soup-type"]:checked').value,
-        scoringMethod: document.querySelector('input[name="scoring-method"]:checked').value,
-        answerMethod: document.querySelector('input[name="answer-method"]:checked').value,
-        interactionMethod: document.querySelector('input[name="interaction-method"]:checked').value
+        soupType: document.getElementById('soup-type').value,
+        scoringMethod: document.getElementById('scoring-method').value,
+        answerMethod: document.getElementById('answer-method').value,
+        interactionMethod: document.getElementById('interaction-method').value
     };
     
     // 设置主持人身份

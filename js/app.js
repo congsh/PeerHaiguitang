@@ -80,128 +80,325 @@ function resetPeerServerIndex() {
 }
 
 // DOM元素
-document.addEventListener('DOMContentLoaded', () => {
-    // 添加事件监听器
-    initEventListeners();
+document.addEventListener('DOMContentLoaded', function() {
+    // 初始化服务器状态显示
+    initServerStatus();
+    
+    // 绑定首页按钮事件
+    document.getElementById('create-room-btn').addEventListener('click', createRoomAsHost);
+    document.getElementById('join-room-btn').addEventListener('click', joinRoomAsGuest);
+    
+    // 监听输入框的Enter按键事件
+    document.getElementById('host-name').addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            createRoomAsHost();
+        }
+    });
+    
+    document.getElementById('guest-name').addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            joinRoomAsGuest();
+        }
+    });
+    
+    document.getElementById('room-id').addEventListener('keypress', function(event) {
+        if (event.key === 'Enter') {
+            joinRoomAsGuest();
+        }
+    });
 });
 
 /**
- * 初始化所有事件监听器
+ * 初始化服务器状态显示
  */
-function initEventListeners() {
-    // 角色选择
-    document.getElementById('host-btn').addEventListener('click', () => showScreen('host-setup-screen'));
-    document.getElementById('guest-btn').addEventListener('click', () => showScreen('guest-setup-screen'));
+function initServerStatus() {
+    const serverStatus = document.getElementById('server-status');
     
-    // 返回按钮
-    document.getElementById('back-from-host').addEventListener('click', () => showScreen('welcome-screen'));
-    document.getElementById('back-from-guest').addEventListener('click', () => showScreen('welcome-screen'));
+    // 清空状态区域
+    serverStatus.innerHTML = '';
     
-    // 创建房间
-    document.getElementById('create-room-btn').addEventListener('click', createRoom);
+    // 创建服务器状态元素
+    for (let i = 0; i < peerServerOptions.length; i++) {
+        const server = peerServerOptions[i];
+        const serverItem = document.createElement('div');
+        serverItem.className = 'server-item';
+        serverItem.setAttribute('data-server', i);
+        
+        const serverName = server.host + (server.port !== 443 ? `:${server.port}` : '');
+        
+        serverItem.innerHTML = `
+            <div class="server-indicator"></div>
+            <div class="server-name">${serverName}</div>
+        `;
+        
+        serverStatus.appendChild(serverItem);
+    }
     
-    // 加入房间
-    document.getElementById('join-room-btn').addEventListener('click', joinRoom);
-    
-    // 复制房间ID
-    document.getElementById('copy-room-id').addEventListener('click', copyRoomId);
-    
-    // 主持人控制
-    document.getElementById('publish-puzzle-btn').addEventListener('click', publishPuzzle);
-    document.getElementById('publish-intel-btn').addEventListener('click', publishIntel);
-    document.getElementById('yes-btn').addEventListener('click', () => sendHostResponse('是'));
-    document.getElementById('no-btn').addEventListener('click', () => sendHostResponse('否'));
-    document.getElementById('uncertain-btn').addEventListener('click', () => sendHostResponse('不确定'));
-    document.getElementById('end-game-btn').addEventListener('click', endGame);
-    document.getElementById('continue-game-btn').addEventListener('click', continueGame);
-    document.getElementById('leave-room-btn').addEventListener('click', leaveRoom);
-    
-    // 参与者控制
-    document.getElementById('send-question-btn').addEventListener('click', sendQuestion);
-    document.getElementById('question-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendQuestion();
+    // 添加刷新按钮事件
+    document.getElementById('refresh-servers-btn').addEventListener('click', function() {
+        // 重置服务器状态
+        resetServerStatus();
+        // 显示提示信息
+        showSystemMessage('正在重新检测服务器状态...');
+        // 重新测试服务器
+        testNextServer(0);
     });
-    document.getElementById('raise-hand-btn').addEventListener('click', raiseHand);
-    document.getElementById('flower-btn').addEventListener('click', () => sendReaction('🌹'));
-    document.getElementById('trash-btn').addEventListener('click', () => sendReaction('🗑️'));
-    document.getElementById('guest-leave-room-btn').addEventListener('click', leaveRoom);
     
-    // 笔记自动保存
-    document.getElementById('personal-notes').addEventListener('input', saveNotes);
-    
-    // 测试服务器连接
-    setTimeout(() => {
-        testServerConnections();
-    }, 1000);
+    // 开始测试服务器
+    testNextServer(0);
 }
 
 /**
- * 显示指定的屏幕，隐藏其他屏幕
- * @param {string} screenId - 要显示的屏幕ID
+ * 重置服务器状态显示
  */
-function showScreen(screenId) {
-    const screens = document.querySelectorAll('.screen');
-    screens.forEach(screen => {
-        screen.classList.remove('active');
+function resetServerStatus() {
+    const serverItems = document.querySelectorAll('.server-item .server-indicator');
+    serverItems.forEach(item => {
+        item.className = 'server-indicator';
     });
-    document.getElementById(screenId).classList.add('active');
+    
+    // 移除之前的STUN测试结果
+    const stunStatus = document.querySelector('.stun-status');
+    if (stunStatus) stunStatus.remove();
+    
+    const connectionInfo = document.querySelector('.connection-info');
+    if (connectionInfo) connectionInfo.remove();
+    
+    const optimizationTip = document.querySelector('.optimization-tip');
+    if (optimizationTip) optimizationTip.remove();
 }
 
 /**
- * 显示系统消息
+ * 更新服务器状态指示器
+ * @param {number} index - 服务器索引
+ * @param {string} status - 状态 (connecting/connected/failed)
+ */
+function updateServerStatus(index, status) {
+    const serverItem = document.querySelector(`.server-item[data-server="${index}"] .server-indicator`);
+    if (serverItem) {
+        // 移除所有状态类
+        serverItem.className = 'server-indicator';
+        // 添加当前状态类
+        serverItem.classList.add(status);
+    }
+}
+
+/**
+ * 测试STUN服务器
+ */
+function testStunServers() {
+    // 创建服务器状态显示区域
+    const serverStatus = document.getElementById('server-status');
+    
+    // 检查是否已存在STUN状态显示
+    let stunStatusDiv = document.querySelector('.stun-status');
+    if (!stunStatusDiv) {
+        stunStatusDiv = document.createElement('div');
+        stunStatusDiv.classList.add('stun-status');
+        stunStatusDiv.innerHTML = `
+            <div class="server-status-title">STUN服务器状态</div>
+            <div class="stun-result">检测中，请稍候...</div>
+        `;
+        serverStatus.parentNode.appendChild(stunStatusDiv);
+    } else {
+        stunStatusDiv.querySelector('.stun-result').innerHTML = '检测中，请稍候...';
+    }
+    
+    // 获取本地网络配置信息（如果可能）
+    try {
+        if (navigator.connection) {
+            // 检查是否已存在连接信息显示
+            let connectionInfo = document.querySelector('.connection-info');
+            if (!connectionInfo) {
+                connectionInfo = document.createElement('div');
+                connectionInfo.classList.add('connection-info');
+                connectionInfo.innerHTML = `
+                    <div class="server-status-title">网络连接信息</div>
+                    <div>连接类型: ${navigator.connection.type || '未知'}</div>
+                    <div>网络下行速度: ${(navigator.connection.downlink || 0).toFixed(1)} Mbps</div>
+                    <div>网络延迟: ${navigator.connection.rtt || '未知'} ms</div>
+                `;
+                serverStatus.parentNode.appendChild(connectionInfo);
+            }
+        }
+    } catch (e) {
+        console.error('获取网络信息失败:', e);
+    }
+    
+    // 创建RTCPeerConnection来测试STUN服务器
+    const stunServers = getStunServers();
+    let workingStunCount = 0;
+    
+    // 使用一个公共的STUN服务器进行简单测试
+    const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+    
+    pc.createDataChannel('test');
+    
+    pc.onicecandidate = (e) => {
+        if (e.candidate) {
+            if (e.candidate.candidate.indexOf('srflx') !== -1) {
+                workingStunCount++;
+                const resultElement = stunStatusDiv.querySelector('.stun-result');
+                if (resultElement) {
+                    resultElement.innerHTML = `发现 ${workingStunCount} 个可用的STUN服务器`;
+                }
+            }
+        }
+    };
+    
+    pc.onicegatheringstatechange = () => {
+        if (pc.iceGatheringState === 'complete') {
+            // ICE收集完成
+            const resultElement = stunStatusDiv.querySelector('.stun-result');
+            if (resultElement) {
+                resultElement.innerHTML = `检测完成，找到 ${workingStunCount} 个可用的STUN服务器`;
+            }
+            
+            // 添加优化建议
+            let optimizationTip = document.querySelector('.optimization-tip');
+            if (!optimizationTip) {
+                optimizationTip = document.createElement('div');
+                optimizationTip.classList.add('optimization-tip');
+                optimizationTip.innerHTML = `
+                    <div class="server-status-title">连接优化建议</div>
+                    <div>• 如果无法连接，尝试更换网络环境</div>
+                    <div>• 确保没有防火墙阻止WebRTC连接</div>
+                    <div>• 移动设备用户建议使用WiFi网络</div>
+                `;
+                serverStatus.parentNode.appendChild(optimizationTip);
+            }
+            
+            pc.close();
+        }
+    };
+    
+    // 开始收集ICE候选项
+    pc.createOffer()
+        .then(offer => pc.setLocalDescription(offer))
+        .catch(err => {
+            console.error('STUN测试失败:', err);
+            const resultElement = stunStatusDiv.querySelector('.stun-result');
+            if (resultElement) {
+                resultElement.innerHTML = `STUN服务器测试失败: ${err.message}`;
+            }
+        });
+}
+
+/**
+ * 更新连接状态显示
+ * @param {string} status - 连接状态 (connecting/connected/disconnected)
+ * @param {string} [message] - 可选的状态消息
+ * @param {string} [elementId='connection-status'] - 状态元素ID
+ */
+function updateConnectionStatus(status, message, elementId = 'connection-status') {
+    const statusElement = document.getElementById(elementId);
+    if (!statusElement) return;
+    
+    // 清除所有状态类
+    statusElement.className = 'connection-badge';
+    
+    // 设置状态类和文本
+    statusElement.classList.add(status);
+    
+    switch (status) {
+        case 'connecting':
+            statusElement.textContent = message || '连接中...';
+            break;
+        case 'connected':
+            statusElement.textContent = message || '已连接';
+            break;
+        case 'disconnected':
+            statusElement.textContent = message || '已断开';
+            break;
+        default:
+            statusElement.textContent = message || '未知状态';
+    }
+}
+
+// 页面切换函数
+/**
+ * 显示主持人页面
+ */
+function showHostPage() {
+    document.getElementById('home-page').style.display = 'none';
+    document.getElementById('host-page').style.display = 'block';
+    document.getElementById('guest-page').style.display = 'none';
+}
+
+/**
+ * 显示参与者页面
+ */
+function showGuestPage() {
+    document.getElementById('home-page').style.display = 'none';
+    document.getElementById('host-page').style.display = 'none';
+    document.getElementById('guest-page').style.display = 'block';
+}
+
+/**
+ * 显示首页
+ */
+function showHomePage() {
+    document.getElementById('home-page').style.display = 'block';
+    document.getElementById('host-page').style.display = 'none';
+    document.getElementById('guest-page').style.display = 'none';
+}
+
+/**
+ * 创建或格式化聊天消息元素
  * @param {string} message - 消息内容
- * @param {string} chatId - 聊天区域ID
+ * @param {string} sender - 发送者名称
+ * @param {string} type - 消息类型 (host/guest/system)
+ * @param {string} [containerId='chat-messages'] - 消息容器ID
  */
-function showSystemMessage(message, chatId = 'host-chat-messages') {
-    const chatMessages = document.getElementById(chatId);
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message system';
+function addChatMessage(message, sender, type, containerId = 'chat-messages') {
+    const chatMessages = document.getElementById(containerId);
+    const messageElement = document.createElement('div');
     
-    const content = document.createElement('div');
-    content.className = 'content';
-    content.textContent = message;
+    if (type === 'system') {
+        // 系统消息
+        messageElement.className = 'message message-system';
+        messageElement.textContent = message;
+    } else {
+        // 用户消息
+        messageElement.className = `message message-${type}`;
+        
+        // 创建消息头部（发送者和时间）
+        const messageHeader = document.createElement('div');
+        messageHeader.className = 'message-header';
+        
+        const senderElement = document.createElement('span');
+        senderElement.className = 'message-sender';
+        senderElement.textContent = sender;
+        
+        const timeElement = document.createElement('span');
+        timeElement.className = 'message-time';
+        timeElement.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        
+        messageHeader.appendChild(senderElement);
+        messageHeader.appendChild(timeElement);
+        
+        // 创建消息内容
+        const messageContent = document.createElement('div');
+        messageContent.className = 'message-content';
+        messageContent.textContent = message;
+        
+        messageElement.appendChild(messageHeader);
+        messageElement.appendChild(messageContent);
+    }
     
-    const timestamp = document.createElement('div');
-    timestamp.className = 'timestamp';
-    timestamp.textContent = new Date().toLocaleTimeString();
-    
-    messageDiv.appendChild(content);
-    messageDiv.appendChild(timestamp);
-    
-    chatMessages.appendChild(messageDiv);
+    chatMessages.appendChild(messageElement);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 /**
- * 显示聊天消息
- * @param {string} sender - 发送者昵称
- * @param {string} message - 消息内容
- * @param {string} type - 消息类型 (host/guest)
- * @param {string} chatId - 聊天区域ID
+ * 系统消息显示
+ * @param {string} message - 系统消息
+ * @param {string} [containerId='chat-messages'] - 消息容器ID
  */
-function showChatMessage(sender, message, type, chatId = 'host-chat-messages') {
-    const chatMessages = document.getElementById(chatId);
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${type}`;
-    
-    const senderDiv = document.createElement('div');
-    senderDiv.className = 'sender';
-    senderDiv.textContent = sender;
-    
-    const content = document.createElement('div');
-    content.className = 'content';
-    content.textContent = message;
-    
-    const timestamp = document.createElement('div');
-    timestamp.className = 'timestamp';
-    timestamp.textContent = new Date().toLocaleTimeString();
-    
-    messageDiv.appendChild(senderDiv);
-    messageDiv.appendChild(content);
-    messageDiv.appendChild(timestamp);
-    
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
+function showSystemMessage(message, containerId = 'chat-messages') {
+    addChatMessage(message, 'System', 'system', containerId);
 }
 
 /**
@@ -420,93 +617,6 @@ function handleNewConnection(conn) {
 }
 
 /**
- * 更新连接状态显示
- * @param {string} status - 连接状态 ('connected', 'disconnected', 'connecting')
- * @param {boolean} isHostStatus - 是否为主持人状态
- */
-function updateConnectionStatus(status, isHostStatus = true) {
-    const statusElement = document.querySelector(
-        isHostStatus ? '#host-connection-status .status-indicator' : '#guest-connection-status .status-indicator'
-    );
-    
-    if (!statusElement) return;
-    
-    // 移除所有状态类
-    statusElement.classList.remove('status-connected', 'status-disconnected', 'status-connecting');
-    
-    // 设置状态文本和类
-    switch (status) {
-        case 'connected':
-            statusElement.textContent = '已连接';
-            statusElement.classList.add('status-connected');
-            break;
-        case 'disconnected':
-            statusElement.textContent = '已断开';
-            statusElement.classList.add('status-disconnected');
-            break;
-        case 'connecting':
-            statusElement.textContent = '连接中';
-            statusElement.classList.add('status-connecting');
-            break;
-        default:
-            statusElement.textContent = status;
-    }
-}
-
-/**
- * 更新服务器状态指示器
- * @param {number} serverIndex - 服务器索引
- * @param {string} status - 状态 ('connecting', 'connected', 'failed')
- */
-function updateServerStatus(serverIndex, status) {
-    const serverItem = document.querySelector(`.server-item[data-server="${serverIndex}"]`);
-    if (!serverItem) return;
-    
-    const indicator = serverItem.querySelector('.server-indicator');
-    if (!indicator) return;
-    
-    // 移除所有状态类
-    indicator.classList.remove('server-connecting', 'server-connected', 'server-failed');
-    
-    // 设置状态文本和类
-    switch (status) {
-        case 'connecting':
-            indicator.textContent = '连接中';
-            indicator.classList.add('server-connecting');
-            break;
-        case 'connected':
-            indicator.textContent = '已连接';
-            indicator.classList.add('server-connected');
-            break;
-        case 'failed':
-            indicator.textContent = '连接失败';
-            indicator.classList.add('server-failed');
-            break;
-        default:
-            indicator.textContent = '待检测';
-    }
-    
-    // 显示服务器状态面板
-    document.getElementById('server-status').classList.add('active');
-}
-
-/**
- * 重置所有服务器状态指示器
- */
-function resetServerStatus() {
-    for (let i = 0; i < peerServerOptions.length; i++) {
-        const serverItem = document.querySelector(`.server-item[data-server="${i}"]`);
-        if (!serverItem) continue;
-        
-        const indicator = serverItem.querySelector('.server-indicator');
-        if (!indicator) continue;
-        
-        indicator.classList.remove('server-connecting', 'server-connected', 'server-failed');
-        indicator.textContent = '待检测';
-    }
-}
-
-/**
  * 测试服务器连接
  */
 function testServerConnections() {
@@ -564,89 +674,6 @@ function testNextServer(index) {
         // 测试下一个服务器
         testNextServer(index + 1);
     });
-}
-
-/**
- * 测试STUN服务器
- */
-function testStunServers() {
-    // 创建服务器状态显示区域
-    const serverStatus = document.getElementById('server-status');
-    const stunStatusDiv = document.createElement('div');
-    stunStatusDiv.classList.add('stun-status');
-    stunStatusDiv.innerHTML = `
-        <div class="server-status-title">STUN服务器状态检测中...</div>
-        <div class="stun-result">测试中，请稍候...</div>
-    `;
-    serverStatus.appendChild(stunStatusDiv);
-    
-    // 获取本地网络配置信息（如果可能）
-    try {
-        if (navigator.connection) {
-            const connectionInfo = document.createElement('div');
-            connectionInfo.classList.add('connection-info');
-            connectionInfo.innerHTML = `
-                <div class="server-status-title">网络连接信息</div>
-                <div>连接类型: ${navigator.connection.type || '未知'}</div>
-                <div>网络下行速度: ${(navigator.connection.downlink || 0).toFixed(1)} Mbps</div>
-                <div>网络延迟: ${navigator.connection.rtt || '未知'} ms</div>
-            `;
-            serverStatus.appendChild(connectionInfo);
-        }
-    } catch (e) {
-        console.error('获取网络信息失败:', e);
-    }
-    
-    // 创建RTCPeerConnection来测试STUN服务器
-    const stunServers = getStunServers();
-    let workingStunCount = 0;
-    
-    // 使用一个公共的STUN服务器进行简单测试
-    const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    });
-    
-    pc.createDataChannel('test');
-    
-    pc.onicecandidate = (e) => {
-        if (e.candidate) {
-            if (e.candidate.candidate.indexOf('srflx') !== -1) {
-                workingStunCount++;
-                stunStatusDiv.querySelector('.stun-result').innerHTML = 
-                    `发现 ${workingStunCount} 个可用的STUN服务器`;
-            }
-        }
-    };
-    
-    pc.onicegatheringstatechange = () => {
-        if (pc.iceGatheringState === 'complete') {
-            // ICE收集完成
-            stunStatusDiv.querySelector('.stun-result').innerHTML = 
-                `检测完成，找到 ${workingStunCount} 个可用的STUN服务器`;
-            
-            // 添加优化建议
-            const optimizationTip = document.createElement('div');
-            optimizationTip.classList.add('optimization-tip');
-            optimizationTip.innerHTML = `
-                <div class="server-status-title">连接优化建议</div>
-                <div>• 如果无法连接，尝试更换网络环境</div>
-                <div>• 确保没有防火墙阻止WebRTC连接</div>
-                <div>• 移动设备用户建议使用WiFi网络</div>
-            `;
-            serverStatus.appendChild(optimizationTip);
-            
-            pc.close();
-        }
-    };
-    
-    // 开始收集ICE候选项
-    pc.createOffer()
-        .then(offer => pc.setLocalDescription(offer))
-        .catch(err => {
-            console.error('STUN测试失败:', err);
-            stunStatusDiv.querySelector('.stun-result').innerHTML = 
-                `STUN服务器测试失败: ${err.message}`;
-        });
 }
 
 // 应用的其他代码将在其他文件中实现 

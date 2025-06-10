@@ -56,6 +56,9 @@ function tryJoinRoom(roomId) {
         }
     }
     
+    // 更新连接状态
+    updateConnectionStatus('connecting', '连接服务器中...', 'connection-status');
+    
     showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`, 'guest-chat-messages');
     
     try {
@@ -79,185 +82,105 @@ function tryJoinRoom(roomId) {
             key: serverConfig.key
         });
         
-        // 设置PeerJS连接超时
-        const peerTimeout = setTimeout(() => {
-            if (peer && !peerId) {
-                if (peer) {
-                    peer.destroy();
-                    peer = null;
-                }
-                
-                // 更新服务器状态
-                updateServerStatus(currentServerIndex, 'failed');
-                
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`当前服务器连接超时，尝试下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                } else {
-                    // 所有服务器都尝试失败
-                    resetPeerServerIndex();
-                    showSystemMessage('连接失败，所有服务器均无法连接', 'guest-chat-messages');
-                    alert('连接失败，请检查网络连接或稍后重试');
-                    showScreen('guest-setup-screen');
-                }
-            }
-        }, 10000); // 10秒超时
-        
-        // 设置PeerJS事件监听
-        peer.on('open', (myPeerId) => {
-            clearTimeout(peerTimeout);
-            console.log('My peer ID is:', myPeerId);
-            peerId = myPeerId;
-            
+        // 连接成功事件
+        peer.on('open', id => {
             // 更新服务器状态
             updateServerStatus(currentServerIndex, 'connected');
             
-            showSystemMessage(`已连接到服务器: ${serverConfig.host}`, 'guest-chat-messages');
-            showSystemMessage(`正在连接到房间: ${roomId}...`, 'guest-chat-messages');
+            showSystemMessage(`已连接到服务器，正在尝试加入房间...`, 'guest-chat-messages');
             
-            try {
-                // 连接到主持人
-                hostConnection = peer.connect(roomId, {
-                    metadata: {
-                        name: userName
-                    },
-                    reliable: true
-                });
-                
-                if (!hostConnection) {
-                    throw new Error('无法创建连接');
-                }
-                
-                // 设置连接超时
-                const connectionTimeout = setTimeout(() => {
-                    if (hostConnection && !hostConnection.open) {
-                        // 如果还有其他服务器可尝试
-                        if (currentServerIndex < peerServerOptions.length - 1) {
-                            showSystemMessage(`房间连接超时，尝试下一个服务器...`, 'guest-chat-messages');
-                            getNextPeerServer();
-                            tryJoinRoom(roomId);
-                        } else {
-                            // 所有服务器都尝试失败
-                            resetPeerServerIndex();
-                            showSystemMessage('连接超时，请检查房间ID是否正确', 'guest-chat-messages');
-                            alert('连接超时，请检查房间ID是否正确');
-                            resetState();
-                            showScreen('guest-setup-screen');
-                        }
-                    }
-                }, 8000); // 8秒超时
-                
-                hostConnection.on('open', () => {
-                    clearTimeout(connectionTimeout);
-                    console.log('Connected to host');
-                    updateConnectionStatus('connected', false);
-                    
-                    // 发送加入请求
-                    hostConnection.send({
-                        type: 'join-request',
-                        name: userName,
-                        peerId: myPeerId
-                    });
-                    
-                    // 显示欢迎消息
-                    showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
-                });
-                
-                hostConnection.on('data', handleHostData);
-                
-                hostConnection.on('close', () => {
-                    console.log('Connection to host closed');
-                    updateConnectionStatus('disconnected', false);
-                    showSystemMessage('与主持人的连接已关闭', 'guest-chat-messages');
-                    
-                    // 返回欢迎界面
-                    setTimeout(() => {
-                        alert('房间已关闭或主持人已离开');
-                        showScreen('welcome-screen');
-                    }, 1000);
-                });
-                
-                hostConnection.on('error', (err) => {
-                    console.error('Connection to host error:', err);
-                    updateConnectionStatus('disconnected', false);
-                    showSystemMessage(`连接错误: ${err}`, 'guest-chat-messages');
-                    
-                    setTimeout(() => {
-                        alert('连接错误，请检查房间ID后重试');
-                        showScreen('guest-setup-screen');
-                    }, 1000);
-                });
-            } catch (error) {
-                console.error('Failed to establish connection:', error);
-                showSystemMessage(`连接错误: ${error.message}`, 'guest-chat-messages');
-                updateConnectionStatus('disconnected', false);
-                
-                setTimeout(() => {
-                    alert(`连接错误: ${error.message}`);
-                    showScreen('guest-setup-screen');
-                }, 1000);
-            }
+            // 连接到主持人
+            connectToHost(roomId);
         });
         
-        peer.on('error', (err) => {
-            clearTimeout(peerTimeout);
-            console.error('PeerJS error:', err);
+        // 连接错误事件
+        peer.on('error', error => {
+            console.error('PeerJS 错误:', error);
             
             // 更新服务器状态
             updateServerStatus(currentServerIndex, 'failed');
             
-            // 检查是否是服务器连接错误
-            if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`服务器连接失败，尝试下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                    return;
-                }
+            if (error.type === 'network' || error.type === 'server-error' || error.type === 'socket-error') {
+                // 网络/服务器错误，尝试下一个服务器
+                showSystemMessage(`服务器 ${serverConfig.host} 连接失败，正在尝试其他服务器...`, 'guest-chat-messages');
+                
+                // 尝试下一个服务器
+                currentServerIndex = (currentServerIndex + 1) % peerServerOptions.length;
+                tryJoinRoom(roomId);
+            } else if (error.type === 'peer-unavailable') {
+                // 房间不存在
+                updateConnectionStatus('disconnected', '房间不存在', 'connection-status');
+                showSystemMessage(`房间 ${roomId} 不存在或已关闭，请检查房间ID`, 'guest-chat-messages');
+            } else {
+                // 其他错误
+                updateConnectionStatus('disconnected', '连接失败', 'connection-status');
+                showSystemMessage(`连接错误: ${error.type}`, 'guest-chat-messages');
             }
-            
-            // 检查是否是找不到主持人错误
-            if (err.type === 'peer-unavailable') {
-                // 如果还有其他服务器可尝试
-                if (currentServerIndex < peerServerOptions.length - 1) {
-                    showSystemMessage(`在当前服务器找不到房间，尝试下一个服务器...`, 'guest-chat-messages');
-                    getNextPeerServer();
-                    tryJoinRoom(roomId);
-                    return;
-                } else {
-                    resetPeerServerIndex();
-                    let errorMessage = '找不到该房间，请检查房间ID是否正确';
-                    showSystemMessage(errorMessage, 'guest-chat-messages');
-                    updateConnectionStatus('disconnected', false);
-                    
-                    setTimeout(() => {
-                        alert(errorMessage);
-                        showScreen('guest-setup-screen');
-                    }, 1000);
-                    return;
-                }
-            }
-            
-            // 其他错误
-            let errorMessage = `连接错误: ${err.type}`;
-            showSystemMessage(errorMessage, 'guest-chat-messages');
-            updateConnectionStatus('disconnected', false);
-            
-            setTimeout(() => {
-                alert(errorMessage);
-                showScreen('guest-setup-screen');
-            }, 1000);
         });
         
-    } catch (err) {
-        console.error('Failed to join room:', err);
-        showSystemMessage(`初始化错误: ${err.message}`, 'guest-chat-messages');
-        alert('加入房间失败，请检查房间ID是否正确');
-        showScreen('guest-setup-screen');
+        // 连接断开事件
+        peer.on('disconnected', () => {
+            updateConnectionStatus('disconnected', '已断开', 'connection-status');
+            showSystemMessage('与服务器的连接已断开，尝试重新连接...', 'guest-chat-messages');
+            
+            // 尝试重新连接
+            peer.reconnect();
+        });
+        
+    } catch (error) {
+        console.error('初始化PeerJS失败:', error);
+        showSystemMessage(`初始化连接失败: ${error.message}`, 'guest-chat-messages');
     }
+}
+
+/**
+ * 连接到主持人
+ * @param {string} hostId - 主持人的PeerJS ID
+ */
+function connectToHost(hostId) {
+    // 更新连接状态
+    updateConnectionStatus('connecting', '连接房间中...', 'connection-status');
+    
+    // 建立到主持人的连接
+    conn = peer.connect(hostId, {
+        reliable: true,
+        metadata: {
+            name: guestName,
+            type: 'guest'
+        }
+    });
+    
+    // 连接打开事件
+    conn.on('open', () => {
+        // 更新连接状态
+        updateConnectionStatus('connected', '已连接', 'connection-status');
+        
+        // 发送加入消息
+        conn.send({
+            type: 'join',
+            name: guestName
+        });
+        
+        showSystemMessage(`成功连接到房间 ${hostId}`, 'guest-chat-messages');
+    });
+    
+    // 连接错误事件
+    conn.on('error', error => {
+        console.error('连接错误:', error);
+        updateConnectionStatus('disconnected', '连接失败', 'connection-status');
+        showSystemMessage(`连接错误: ${error.message || '未知错误'}`, 'guest-chat-messages');
+    });
+    
+    // 连接关闭事件
+    conn.on('close', () => {
+        updateConnectionStatus('disconnected', '已断开', 'connection-status');
+        showSystemMessage('与主持人的连接已断开', 'guest-chat-messages');
+    });
+    
+    // 收到数据事件
+    conn.on('data', data => {
+        handleGuestReceivedData(data);
+    });
 }
 
 /**
@@ -549,5 +472,366 @@ function loadNotes() {
             notesTextarea.value = savedNotes;
             notes = savedNotes;
         }
+    }
+}
+
+// 全局变量
+let peer = null;
+let conn = null;
+let currentServerIndex = 0;
+let guestName = '';
+let roomId = '';
+let participants = {};
+let hostName = '';
+let isHandRaised = false;
+
+/**
+ * 从参与者身份加入房间
+ */
+function joinRoomAsGuest() {
+    // 获取参与者名称和房间ID
+    guestName = document.getElementById('guest-name').value.trim();
+    roomId = document.getElementById('room-id').value.trim().toUpperCase();
+    
+    if (!guestName) {
+        alert('请输入您的名称');
+        return;
+    }
+    
+    if (!roomId) {
+        alert('请输入房间ID');
+        return;
+    }
+    
+    // 验证房间ID格式
+    if (!isValidRoomId(roomId)) {
+        alert('房间ID格式不正确，应为4-10位字母和数字');
+        return;
+    }
+    
+    // 切换到参与者页面
+    showGuestPage();
+    
+    // 显示房间ID
+    document.getElementById('guest-room-id-display').textContent = roomId;
+    
+    // 尝试加入房间
+    tryJoinRoom(roomId);
+    
+    // 绑定参与者页面事件
+    initGuestEvents();
+}
+
+/**
+ * 验证房间ID格式
+ * @param {string} id - 要验证的房间ID
+ * @returns {boolean} 是否有效
+ */
+function isValidRoomId(id) {
+    return /^[A-Z0-9]{4,10}$/.test(id);
+}
+
+/**
+ * 初始化参与者页面事件
+ */
+function initGuestEvents() {
+    // 发送消息
+    document.getElementById('guest-send-message-btn').addEventListener('click', sendGuestMessage);
+    document.getElementById('guest-chat-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendGuestMessage();
+        }
+    });
+    
+    // 举手按钮
+    document.getElementById('raise-hand-btn').addEventListener('click', toggleRaiseHand);
+    
+    // 保存和清除笔记
+    document.getElementById('save-notes-btn').addEventListener('click', saveNotes);
+    document.getElementById('clear-notes-btn').addEventListener('click', clearNotes);
+}
+
+/**
+ * 发送参与者消息
+ */
+function sendGuestMessage() {
+    const chatInput = document.getElementById('guest-chat-input');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    // 检查连接状态
+    if (!conn || !conn.open) {
+        showSystemMessage('连接已断开，无法发送消息', 'guest-chat-messages');
+        return;
+    }
+    
+    // 在本地显示消息
+    addChatMessage(message, guestName, 'guest', 'guest-chat-messages');
+    
+    // 发送消息给主持人
+    conn.send({
+        type: 'chat',
+        sender: guestName,
+        message: message
+    });
+    
+    // 清空输入框
+    chatInput.value = '';
+}
+
+/**
+ * 切换举手状态
+ */
+function toggleRaiseHand() {
+    const raiseHandBtn = document.getElementById('raise-hand-btn');
+    
+    // 切换举手状态
+    isHandRaised = !isHandRaised;
+    
+    if (isHandRaised) {
+        // 更新按钮样式
+        raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 取消举手';
+        raiseHandBtn.classList.add('btn-danger');
+        
+        // 发送举手消息
+        conn.send({
+            type: 'raise-hand',
+            name: guestName
+        });
+        
+        // 显示系统消息
+        showSystemMessage('您已举手，等待主持人回应', 'guest-chat-messages');
+    } else {
+        // 更新按钮样式
+        raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 举手';
+        raiseHandBtn.classList.remove('btn-danger');
+        
+        // 发送取消举手消息
+        conn.send({
+            type: 'cancel-raise-hand',
+            name: guestName
+        });
+        
+        // 显示系统消息
+        showSystemMessage('您已取消举手', 'guest-chat-messages');
+    }
+}
+
+/**
+ * 保存笔记
+ */
+function saveNotes() {
+    const notes = document.getElementById('personal-notes').value;
+    localStorage.setItem('haiguitang_notes_' + roomId, notes);
+    showSystemMessage('笔记已保存', 'guest-chat-messages');
+}
+
+/**
+ * 清除笔记
+ */
+function clearNotes() {
+    if (confirm('确定要清除所有笔记吗？')) {
+        document.getElementById('personal-notes').value = '';
+        localStorage.removeItem('haiguitang_notes_' + roomId);
+        showSystemMessage('笔记已清除', 'guest-chat-messages');
+    }
+}
+
+/**
+ * 处理收到的消息
+ * @param {Object} data - 消息数据
+ */
+function handleGuestReceivedData(data) {
+    console.log('参与者收到消息:', data);
+    
+    switch (data.type) {
+        case 'welcome':
+            // 欢迎消息
+            handleWelcomeMessage(data);
+            break;
+        case 'chat':
+            // 聊天消息
+            addChatMessage(data.message, data.sender, 'host', 'guest-chat-messages');
+            break;
+        case 'rules':
+            // 规则更新
+            handleRulesUpdate(data);
+            break;
+        case 'puzzle':
+            // 题目更新
+            handlePuzzleUpdate(data);
+            break;
+        case 'clear-puzzle':
+            // 清除题目
+            handleClearPuzzle();
+            break;
+        case 'host-response':
+            // 主持人回应
+            handleHostResponse(data);
+            break;
+        case 'participant-update':
+            // 参与者列表更新
+            handleParticipantUpdate(data);
+            break;
+        default:
+            console.log('未知消息类型:', data.type);
+    }
+}
+
+/**
+ * 处理欢迎消息
+ * @param {Object} data - 欢迎消息数据
+ */
+function handleWelcomeMessage(data) {
+    hostName = data.host;
+    
+    // 更新连接状态
+    showSystemMessage(`成功连接到主持人 ${hostName} 的房间`, 'guest-chat-messages');
+    
+    // 加载保存的笔记
+    const savedNotes = localStorage.getItem('haiguitang_notes_' + roomId);
+    if (savedNotes) {
+        document.getElementById('personal-notes').value = savedNotes;
+    }
+}
+
+/**
+ * 处理规则更新
+ * @param {Object} data - 规则数据
+ */
+function handleRulesUpdate(data) {
+    const rulesContainer = document.getElementById('guest-rules');
+    rulesContainer.innerHTML = data.content.replace(/\n/g, '<br>');
+    
+    showSystemMessage('主持人更新了游戏规则', 'guest-chat-messages');
+}
+
+/**
+ * 处理题目更新
+ * @param {Object} data - 题目数据
+ */
+function handlePuzzleUpdate(data) {
+    document.getElementById('puzzle-title-display').textContent = data.title;
+    document.getElementById('puzzle-content-display').innerHTML = data.content.replace(/\n/g, '<br>');
+    
+    showSystemMessage('主持人发布了新题目', 'guest-chat-messages');
+}
+
+/**
+ * 处理清除题目
+ */
+function handleClearPuzzle() {
+    document.getElementById('puzzle-title-display').textContent = '等待主持人设置题目...';
+    document.getElementById('puzzle-content-display').textContent = '主持人尚未设置题目，请耐心等待。';
+    
+    showSystemMessage('主持人清除了题目', 'guest-chat-messages');
+}
+
+/**
+ * 处理主持人回应
+ * @param {Object} data - 回应数据
+ */
+function handleHostResponse(data) {
+    // 更新举手状态
+    isHandRaised = false;
+    
+    // 更新按钮样式
+    const raiseHandBtn = document.getElementById('raise-hand-btn');
+    raiseHandBtn.innerHTML = '<i class="fas fa-hand-paper"></i> 举手';
+    raiseHandBtn.classList.remove('btn-danger');
+    
+    // 显示系统消息
+    showSystemMessage(`主持人回应: ${data.message}`, 'guest-chat-messages');
+}
+
+/**
+ * 处理参与者列表更新
+ * @param {Object} data - 参与者列表数据
+ */
+function handleParticipantUpdate(data) {
+    participants = {};
+    
+    // 更新参与者列表
+    data.participants.forEach(p => {
+        participants[p.id] = {
+            name: p.name,
+            status: p.status
+        };
+    });
+    
+    // 更新UI
+    updateGuestParticipantsList();
+}
+
+/**
+ * 更新参与者列表UI
+ */
+function updateGuestParticipantsList() {
+    const participantsList = document.getElementById('guest-participants-list');
+    const participantCount = document.getElementById('guest-participant-count');
+    
+    // 清空列表
+    participantsList.innerHTML = '';
+    
+    // 添加主持人
+    const hostItem = document.createElement('li');
+    hostItem.className = 'participant-item';
+    
+    // 创建头像
+    const hostAvatar = document.createElement('div');
+    hostAvatar.className = 'participant-avatar';
+    hostAvatar.style.backgroundColor = '#e74c3c';
+    hostAvatar.textContent = hostName.charAt(0).toUpperCase();
+    
+    // 创建名称
+    const hostNameElement = document.createElement('div');
+    hostNameElement.className = 'participant-name';
+    hostNameElement.textContent = `${hostName} (主持人)`;
+    
+    hostItem.appendChild(hostAvatar);
+    hostItem.appendChild(hostNameElement);
+    participantsList.appendChild(hostItem);
+    
+    // 计算参与者数量（包括主持人）
+    const count = Object.keys(participants).length + 1;
+    participantCount.textContent = count;
+    
+    // 添加其他参与者
+    for (const peerId in participants) {
+        const participant = participants[peerId];
+        const listItem = document.createElement('li');
+        listItem.className = 'participant-item';
+        
+        // 创建头像
+        const avatar = document.createElement('div');
+        avatar.className = 'participant-avatar';
+        avatar.textContent = participant.name.charAt(0).toUpperCase();
+        
+        // 创建名称
+        const name = document.createElement('div');
+        name.className = 'participant-name';
+        name.textContent = participant.name;
+        
+        // 创建状态
+        const status = document.createElement('div');
+        status.className = 'participant-status';
+        
+        if (participant.status === 'raised-hand') {
+            status.textContent = '举手中';
+            status.classList.add('status-raised-hand');
+        } else {
+            status.textContent = '在线';
+            status.classList.add('status-online');
+        }
+        
+        // 添加到列表项
+        listItem.appendChild(avatar);
+        listItem.appendChild(name);
+        listItem.appendChild(status);
+        
+        // 添加到列表
+        participantsList.appendChild(listItem);
     }
 } 

@@ -23,40 +23,389 @@ function generateRoomId() {
 }
 
 /**
- * 创建新房间
+ * 从主持人身份创建房间
  */
-function createRoom() {
-    // 获取表单数据
-    roomName = document.getElementById('room-name').value.trim();
-    userName = document.getElementById('host-name').value.trim();
+function createRoomAsHost() {
+    // 获取主持人名称
+    hostName = document.getElementById('host-name').value.trim();
     
-    // 验证输入
-    if (!roomName || !userName) {
-        alert('请填写房间名称和主持人昵称');
+    if (!hostName) {
+        alert('请输入您的名称');
         return;
     }
     
-    // 获取房间规则
-    roomRules = {
-        soupType: document.getElementById('soup-type').value,
-        scoringMethod: document.getElementById('scoring-method').value,
-        answerMethod: document.getElementById('answer-method').value,
-        interactionMethod: document.getElementById('interaction-method').value
+    // 切换到主持人页面
+    showHostPage();
+    
+    // 创建房间
+    tryCreateRoom();
+    
+    // 绑定主持人页面事件
+    initHostEvents();
+}
+
+/**
+ * 初始化主持人页面事件
+ */
+function initHostEvents() {
+    // 复制房间ID按钮
+    document.getElementById('copy-room-id').addEventListener('click', function() {
+        const roomIdText = document.getElementById('room-id-display').textContent;
+        navigator.clipboard.writeText(roomIdText)
+            .then(() => {
+                this.innerHTML = '<i class="fas fa-check"></i> 已复制';
+                setTimeout(() => {
+                    this.innerHTML = '<i class="fas fa-copy"></i> 复制';
+                }, 2000);
+            });
+    });
+    
+    // 发送消息
+    document.getElementById('send-message-btn').addEventListener('click', sendHostMessage);
+    document.getElementById('chat-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendHostMessage();
+        }
+    });
+    
+    // 设置题目
+    document.getElementById('set-puzzle-btn').addEventListener('click', setPuzzle);
+    document.getElementById('clear-puzzle-btn').addEventListener('click', clearPuzzle);
+    
+    // 更新规则
+    document.getElementById('update-rules-btn').addEventListener('click', updateRules);
+}
+
+/**
+ * 发送主持人消息
+ */
+function sendHostMessage() {
+    const chatInput = document.getElementById('chat-input');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    // 在本地显示消息
+    addChatMessage(message, hostName, 'host');
+    
+    // 发送消息给所有参与者
+    broadcastToAll({
+        type: 'chat',
+        sender: hostName,
+        message: message,
+        senderType: 'host'
+    });
+    
+    // 清空输入框
+    chatInput.value = '';
+}
+
+/**
+ * 设置题目
+ */
+function setPuzzle() {
+    const puzzleTitle = document.getElementById('puzzle-title').value.trim();
+    const puzzleContent = document.getElementById('puzzle-content').value.trim();
+    
+    if (!puzzleTitle || !puzzleContent) {
+        alert('请输入题目标题和内容');
+        return;
+    }
+    
+    // 向所有参与者广播题目
+    broadcastToAll({
+        type: 'puzzle',
+        title: puzzleTitle,
+        content: puzzleContent
+    });
+    
+    // 显示系统消息
+    showSystemMessage(`题目已发布: ${puzzleTitle}`);
+}
+
+/**
+ * 清除题目
+ */
+function clearPuzzle() {
+    // 向所有参与者广播清除题目的消息
+    broadcastToAll({
+        type: 'clear-puzzle'
+    });
+    
+    // 清空输入框
+    document.getElementById('puzzle-title').value = '';
+    document.getElementById('puzzle-content').value = '';
+    
+    // 显示系统消息
+    showSystemMessage('题目已清除');
+}
+
+/**
+ * 更新规则
+ */
+function updateRules() {
+    const rules = document.getElementById('game-rules').value.trim();
+    
+    if (!rules) {
+        alert('请输入游戏规则');
+        return;
+    }
+    
+    // 向所有参与者广播规则
+    broadcastToAll({
+        type: 'rules',
+        content: rules
+    });
+    
+    // 显示系统消息
+    showSystemMessage('规则已更新并发送给所有参与者');
+}
+
+/**
+ * 处理收到的消息
+ * @param {Object} data - 消息数据
+ * @param {string} peerId - 发送者ID
+ */
+function handleHostReceivedData(data, peerId) {
+    console.log('主持人收到消息:', data);
+    
+    switch (data.type) {
+        case 'join':
+            // 参与者加入
+            handleParticipantJoin(data, peerId);
+            break;
+        case 'chat':
+            // 聊天消息
+            addChatMessage(data.message, data.sender, 'guest');
+            break;
+        case 'raise-hand':
+            // 举手
+            handleRaiseHand(data, peerId);
+            break;
+        case 'leave':
+            // 参与者离开
+            handleParticipantLeave(peerId);
+            break;
+        default:
+            console.log('未知消息类型:', data.type);
+    }
+}
+
+/**
+ * 处理参与者加入
+ * @param {Object} data - 加入数据
+ * @param {string} peerId - 参与者ID
+ */
+function handleParticipantJoin(data, peerId) {
+    const { name } = data;
+    
+    // 保存参与者信息
+    participants[peerId] = {
+        name: name,
+        status: 'online'
     };
     
-    // 初始化主持人
-    isHost = true;
+    // 更新参与者列表
+    updateParticipantsList();
     
-    // 显示创建中状态
-    showScreen('host-room-screen');
-    document.getElementById('host-room-name').textContent = `房间: ${roomName} (创建中...)`;
-    showSystemMessage('正在创建房间，请稍候...');
+    // 发送当前房间信息给新参与者
+    const conn = connections[peerId];
+    if (conn) {
+        // 发送欢迎消息
+        conn.send({
+            type: 'welcome',
+            host: hostName,
+            roomId: roomId
+        });
+        
+        // 发送当前规则
+        const rules = document.getElementById('game-rules').value.trim();
+        if (rules) {
+            conn.send({
+                type: 'rules',
+                content: rules
+            });
+        }
+        
+        // 发送当前题目
+        const puzzleTitle = document.getElementById('puzzle-title').value.trim();
+        const puzzleContent = document.getElementById('puzzle-content').value.trim();
+        if (puzzleTitle && puzzleContent) {
+            conn.send({
+                type: 'puzzle',
+                title: puzzleTitle,
+                content: puzzleContent
+            });
+        }
+    }
     
-    // 重置服务器索引
-    resetPeerServerIndex();
+    // 通知其他参与者有新人加入
+    broadcastToAll({
+        type: 'participant-update',
+        participants: getParticipantsList()
+    });
     
-    // 尝试创建房间
-    tryCreateRoom();
+    // 显示系统消息
+    showSystemMessage(`${name} 加入了房间`);
+}
+
+/**
+ * 处理参与者离开
+ * @param {string} peerId - 参与者ID
+ */
+function handleParticipantLeave(peerId) {
+    if (participants[peerId]) {
+        const name = participants[peerId].name;
+        
+        // 从参与者列表中移除
+        delete participants[peerId];
+        delete connections[peerId];
+        
+        // 更新参与者列表
+        updateParticipantsList();
+        
+        // 通知其他参与者有人离开
+        broadcastToAll({
+            type: 'participant-update',
+            participants: getParticipantsList()
+        });
+        
+        // 显示系统消息
+        showSystemMessage(`${name} 离开了房间`);
+    }
+}
+
+/**
+ * 处理参与者举手
+ * @param {Object} data - 举手数据
+ * @param {string} peerId - 参与者ID
+ */
+function handleRaiseHand(data, peerId) {
+    if (participants[peerId]) {
+        const name = participants[peerId].name;
+        
+        // 更新参与者状态
+        participants[peerId].status = 'raised-hand';
+        
+        // 更新参与者列表
+        updateParticipantsList();
+        
+        // 显示系统消息
+        showSystemMessage(`${name} 举手提问`);
+        
+        // 语音提示（如果浏览器支持）
+        if ('speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(`${name}举手提问`);
+            utterance.lang = 'zh-CN';
+            speechSynthesis.speak(utterance);
+        }
+    }
+}
+
+/**
+ * 更新参与者列表UI
+ */
+function updateParticipantsList() {
+    const participantsList = document.getElementById('participants-list');
+    const participantCount = document.getElementById('participant-count');
+    
+    // 清空列表
+    participantsList.innerHTML = '';
+    
+    // 计算参与者数量
+    const count = Object.keys(participants).length;
+    participantCount.textContent = count;
+    
+    // 添加参与者
+    for (const peerId in participants) {
+        const participant = participants[peerId];
+        const listItem = document.createElement('li');
+        listItem.className = 'participant-item';
+        
+        // 创建头像
+        const avatar = document.createElement('div');
+        avatar.className = 'participant-avatar';
+        avatar.textContent = participant.name.charAt(0).toUpperCase();
+        
+        // 创建名称
+        const name = document.createElement('div');
+        name.className = 'participant-name';
+        name.textContent = participant.name;
+        
+        // 创建状态
+        const status = document.createElement('div');
+        status.className = 'participant-status';
+        
+        if (participant.status === 'raised-hand') {
+            status.textContent = '举手中';
+            status.classList.add('status-raised-hand');
+            
+            // 添加回应按钮
+            const respondBtn = document.createElement('button');
+            respondBtn.className = 'btn';
+            respondBtn.style.padding = '2px 5px';
+            respondBtn.style.fontSize = '0.8rem';
+            respondBtn.style.marginLeft = '5px';
+            respondBtn.textContent = '回应';
+            respondBtn.addEventListener('click', () => {
+                // 发送回应消息
+                const conn = connections[peerId];
+                if (conn) {
+                    conn.send({
+                        type: 'host-response',
+                        message: '请提问'
+                    });
+                    
+                    // 更新参与者状态
+                    participants[peerId].status = 'online';
+                    updateParticipantsList();
+                }
+            });
+            
+            status.appendChild(respondBtn);
+        } else {
+            status.textContent = '在线';
+            status.classList.add('status-online');
+        }
+        
+        // 添加到列表项
+        listItem.appendChild(avatar);
+        listItem.appendChild(name);
+        listItem.appendChild(status);
+        
+        // 添加到列表
+        participantsList.appendChild(listItem);
+    }
+}
+
+/**
+ * 获取参与者列表数据
+ * @returns {Array} 参与者列表
+ */
+function getParticipantsList() {
+    const list = [];
+    for (const peerId in participants) {
+        list.push({
+            id: peerId,
+            name: participants[peerId].name,
+            status: participants[peerId].status
+        });
+    }
+    return list;
+}
+
+/**
+ * 向所有参与者广播消息
+ * @param {Object} data - 要广播的数据
+ */
+function broadcastToAll(data) {
+    for (const peerId in connections) {
+        const conn = connections[peerId];
+        if (conn && conn.open) {
+            conn.send(data);
+        }
+    }
 }
 
 /**
@@ -78,6 +427,9 @@ function tryCreateRoom() {
         }
     }
     
+    // 更新连接状态
+    updateConnectionStatus('connecting', '连接服务器中...');
+    
     showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`);
     
     // 初始化PeerJS连接，使用自定义ID
@@ -94,120 +446,62 @@ function tryCreateRoom() {
         key: serverConfig.key
     });
     
-    // 设置连接超时
-    const peerTimeout = setTimeout(() => {
-        if (peer) {
-            peer.destroy();
-            peer = null;
-        }
-        
-        // 更新服务器状态
-        updateServerStatus(currentServerIndex, 'failed');
-        
-        // 如果还有其他服务器可尝试
-        if (currentServerIndex < peerServerOptions.length - 1) {
-            showSystemMessage(`当前服务器连接超时，尝试下一个服务器...`);
-            getNextPeerServer();
-            tryCreateRoom();
-        } else {
-            // 所有服务器都尝试失败
-            resetPeerServerIndex();
-            showSystemMessage('创建房间失败，所有服务器均无法连接');
-            alert('创建房间失败，请检查网络连接或稍后重试');
-            showScreen('host-setup-screen');
-        }
-    }, 10000); // 10秒超时
-    
-    peer.on('open', (id) => {
-        clearTimeout(peerTimeout);
-        console.log('Room created with ID:', id);
-        peerId = id;
+    // 连接成功事件
+    peer.on('open', id => {
+        roomId = id;
+        document.getElementById('room-id-display').textContent = roomId;
         
         // 更新服务器状态
         updateServerStatus(currentServerIndex, 'connected');
         
-        // 设置房间ID显示
-        const roomIdDisplay = document.getElementById('room-id-display');
-        roomIdDisplay.textContent = id;
-        
-        // 自动复制ID到剪贴板
-        try {
-            navigator.clipboard.writeText(id).then(() => {
-                showSystemMessage('房间ID已自动复制到剪贴板');
-            }).catch(err => {
-                console.error('Failed to auto-copy room ID:', err);
-            });
-        } catch (err) {
-            console.error('Clipboard API not available:', err);
-        }
-        
-        // 设置房间名称显示
-        document.getElementById('host-room-name').textContent = `房间: ${roomName}`;
-        
-        // 添加主持人到参与者列表
-        participants[id] = {
-            name: userName,
-            isHost: true
-        };
-        
-        // 更新参与者列表显示
-        updateParticipantsList();
-        
-        // 更新规则显示
-        updateRulesList();
-        
-        // 显示欢迎消息
-        showSystemMessage(`房间 "${roomName}" 已创建，等待参与者加入...`);
-        showSystemMessage(`请将房间ID: ${id} 分享给参与者`);
-        showSystemMessage(`已连接到服务器: ${serverConfig.host}`);
-        
         // 更新连接状态
-        updateConnectionStatus('connected', true);
+        updateConnectionStatus('connected', '已连接');
         
-        // 设置PeerJS事件监听
-        setupPeerEvents();
+        showSystemMessage(`房间创建成功，ID: ${roomId}`);
     });
     
-    peer.on('error', (err) => {
-        clearTimeout(peerTimeout);
-        console.error('PeerJS error:', err);
+    // 连接错误事件
+    peer.on('error', error => {
+        console.error('PeerJS 错误:', error);
         
         // 更新服务器状态
         updateServerStatus(currentServerIndex, 'failed');
         
-        // 检查是否是ID已被占用错误
-        if (err.type === 'unavailable-id') {
-            // ID被占用，重新尝试创建房间
+        if (error.type === 'unavailable-id') {
+            // ID已被占用，尝试使用新ID
+            showSystemMessage('房间ID已被占用，正在尝试新的ID...');
+            currentServerIndex = 0;
             tryCreateRoom();
-            return;
+        } else if (error.type === 'network' || error.type === 'server-error' || error.type === 'socket-error') {
+            // 网络/服务器错误，尝试下一个服务器
+            showSystemMessage(`服务器 ${serverConfig.host} 连接失败，正在尝试其他服务器...`);
+            
+            // 尝试下一个服务器
+            currentServerIndex = (currentServerIndex + 1) % peerServerOptions.length;
+            tryCreateRoom();
+        } else {
+            // 其他错误
+            updateConnectionStatus('disconnected', '连接失败');
+            showSystemMessage(`连接错误: ${error.type}`);
         }
+    });
+    
+    // 连接断开事件
+    peer.on('disconnected', () => {
+        updateConnectionStatus('disconnected', '已断开');
+        showSystemMessage('与服务器的连接已断开，尝试重新连接...');
         
-        // 检查是否是服务器连接错误
-        if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
-            // 如果还有其他服务器可尝试
-            if (currentServerIndex < peerServerOptions.length - 1) {
-                showSystemMessage(`服务器连接失败，尝试下一个服务器...`);
-                getNextPeerServer();
-                tryCreateRoom();
-            } else {
-                // 所有服务器都尝试失败
-                resetPeerServerIndex();
-                showSystemMessage('创建房间失败，所有服务器均无法连接');
-                alert('创建房间失败，请检查网络连接或稍后重试');
-                showScreen('host-setup-screen');
-            }
-            return;
-        }
+        // 尝试重新连接
+        peer.reconnect();
+    });
+    
+    // 收到连接请求事件
+    peer.on('connection', conn => {
+        const peerId = conn.peer;
+        connections[peerId] = conn;
         
-        // 其他错误
-        showSystemMessage(`创建房间失败: ${err.message || err.type}`);
-        alert('创建房间失败，请重试');
-        showScreen('host-setup-screen');
-        
-        if (peer) {
-            peer.destroy();
-            peer = null;
-        }
+        // 设置连接事件处理
+        setupConnectionEvents(conn);
     });
 }
 
@@ -244,31 +538,6 @@ function setupPeerEvents() {
         connections = {};
         updateConnectionStatus('disconnected', true);
         showSystemMessage('连接已关闭');
-    });
-}
-
-/**
- * 更新参与者列表显示
- */
-function updateParticipantsList() {
-    const participantsList = document.getElementById('participants-list');
-    participantsList.innerHTML = '';
-    
-    // 先添加主持人
-    Object.keys(participants).forEach(pid => {
-        const participant = participants[pid];
-        
-        const li = document.createElement('li');
-        li.innerHTML = `${participant.name} ${participant.isHost ? '(主持人)' : ''}`;
-        
-        if (participant.raisedHand) {
-            const handIcon = document.createElement('span');
-            handIcon.textContent = ' ✋';
-            handIcon.title = '已举手';
-            li.appendChild(handIcon);
-        }
-        
-        participantsList.appendChild(li);
     });
 }
 
@@ -322,18 +591,6 @@ function broadcastParticipants() {
     };
     
     broadcastToAll(message);
-}
-
-/**
- * 向所有参与者广播消息
- * @param {Object} message - 要广播的消息对象
- */
-function broadcastToAll(message) {
-    Object.values(connections).forEach(conn => {
-        if (conn.open) {
-            conn.send(message);
-        }
-    });
 }
 
 /**

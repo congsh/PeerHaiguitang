@@ -48,6 +48,12 @@ function initEventListeners() {
     // 加入房间
     document.getElementById('join-room-btn').addEventListener('click', joinRoom);
     
+    // 取消加入
+    document.getElementById('cancel-join-btn').addEventListener('click', () => {
+        apiClient.stopPolling();
+        showScreen('guest-setup-screen');
+    });
+    
     // 复制房间ID
     document.getElementById('copy-room-id').addEventListener('click', copyRoomId);
     

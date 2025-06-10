@@ -47,6 +47,28 @@ function getStunServers() {
         { urls: 'stun:stun.12connect.com:3478' },
         { urls: 'stun:stun.12voip.com:3478' },
         { urls: 'stun:stun.1und1.de:3478' },
-        { urls: 'stun:stun.3cx.com:3478' }
+        { urls: 'stun:stun.3cx.com:3478' },
+        
+        // 添加公共TURN服务器，解决严格NAT环境的连接问题
+        {
+            urls: 'turn:numb.viagenie.ca',
+            credential: 'muazkh',
+            username: 'webrtc@live.com'
+        },
+        {
+            urls: 'turn:turn.anyfirewall.com:443?transport=tcp',
+            credential: 'webrtc',
+            username: 'webrtc'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            credential: 'openrelayproject',
+            username: 'openrelayproject'
+        },
+        {
+            urls: 'turn:relay.metered.ca:80',
+            username: 'ad0e0c2c9ad4bdd82c0ee943',
+            credential: 'fDi6dwXQmYMbP1OF'
+        }
     ];
 } 

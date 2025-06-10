@@ -23,28 +23,33 @@ function generateRoomId() {
 }
 
 /**
- * 创建新房间
+ * 创建房间
  */
 function createRoom() {
-    // 获取表单数据
+    // 获取房间名称和主持人名称
     roomName = document.getElementById('room-name').value.trim();
     userName = document.getElementById('host-name').value.trim();
     
     // 验证输入
-    if (!roomName || !userName) {
-        alert('请填写房间名称和主持人昵称');
+    if (!roomName) {
+        alert('请输入房间名称');
+        return;
+    }
+    
+    if (!userName) {
+        alert('请输入你的名称');
         return;
     }
     
     // 获取房间规则
     roomRules = {
-        soupType: document.getElementById('soup-type').value,
-        scoringMethod: document.getElementById('scoring-method').value,
-        answerMethod: document.getElementById('answer-method').value,
-        interactionMethod: document.getElementById('interaction-method').value
+        soupType: document.querySelector('input[name="soup-type"]:checked').value,
+        scoringMethod: document.querySelector('input[name="scoring-method"]:checked').value,
+        answerMethod: document.querySelector('input[name="answer-method"]:checked').value,
+        interactionMethod: document.querySelector('input[name="interaction-method"]:checked').value
     };
     
-    // 初始化主持人
+    // 设置主持人身份
     isHost = true;
     
     // 显示创建中状态
@@ -52,164 +57,134 @@ function createRoom() {
     document.getElementById('host-room-name').textContent = `房间: ${roomName} (创建中...)`;
     showSystemMessage('正在创建房间，请稍候...');
     
-    // 重置服务器索引
-    resetPeerServerIndex();
-    
-    // 尝试创建房间
+    // 创建房间
     tryCreateRoom();
 }
 
 /**
- * 尝试使用当前服务器创建房间
+ * 尝试使用API创建房间
  */
 function tryCreateRoom() {
-    // 生成自定义房间ID
-    const customRoomId = generateRoomId();
+    showSystemMessage('正在连接到服务器...');
     
-    // 由于我们只有一个服务器选项，简化连接逻辑
-    const serverConfig = peerServerOptions[0];
-    currentServerIndex = 0; // 确保使用第一个(也是唯一的)服务器
-    
-    // 更新服务器状态指示器
-    updateServerStatus(0, 'connecting');
-    
-    showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`);
-    
-    // 初始化PeerJS连接，使用自定义ID
-    peer = new Peer(customRoomId, {
-        debug: 3, // 提高调试级别
-        config: {
-            'iceServers': getStunServers()
-        },
-        pingInterval: 5000,
-        host: serverConfig.host,
-        port: serverConfig.port,
-        path: serverConfig.path,
-        secure: serverConfig.secure,
-        key: serverConfig.key
-    });
-    
-    // 设置连接超时
-    const peerTimeout = setTimeout(() => {
-        if (peer) {
-            peer.destroy();
-            peer = null;
-        }
+    // 使用API客户端创建房间
+    apiClient.createRoom(roomName, roomRules, userName)
+        .then(roomId => {
+            console.log('房间创建成功:', roomId);
+            peerId = roomId;
+            
+            // 设置房间ID显示
+            const roomIdDisplay = document.getElementById('room-id-display');
+            roomIdDisplay.textContent = roomId;
+            
+            // 自动复制ID到剪贴板
+            try {
+                navigator.clipboard.writeText(roomId).then(() => {
+                    showSystemMessage('房间ID已自动复制到剪贴板');
+                }).catch(err => {
+                    console.error('Failed to auto-copy room ID:', err);
+                });
+            } catch (err) {
+                console.error('Clipboard API not available:', err);
+            }
+            
+            // 设置房间名称显示
+            document.getElementById('host-room-name').textContent = `房间: ${roomName}`;
+            
+            // 添加主持人到参与者列表
+            participants[apiClient.clientId] = {
+                name: userName,
+                isHost: true
+            };
+            
+            // 更新参与者列表显示
+            updateParticipantsList();
+            
+            // 更新规则显示
+            updateRulesList();
+            
+            // 显示欢迎消息
+            showSystemMessage(`房间 "${roomName}" 已创建，等待参与者加入...`);
+            showSystemMessage(`请将房间ID: ${roomId} 分享给参与者`);
+            
+            // 更新连接状态
+            updateConnectionStatus('connected', true);
+            
+            // 设置消息处理
+            setupMessageHandlers();
+        })
+        .catch(error => {
+            console.error('创建房间失败:', error);
+            showSystemMessage(`创建房间失败: ${error.message}`);
+            alert('创建房间失败，请检查网络连接或稍后重试');
+            showScreen('host-setup-screen');
+        });
+}
+
+/**
+ * 设置消息处理函数
+ */
+function setupMessageHandlers() {
+    // 处理加入请求
+    apiClient.onMessage('join-request', message => {
+        console.log('收到加入请求:', message);
         
-        // 更新服务器状态
-        updateServerStatus(0, 'failed');
-        
-        resetPeerServerIndex();
-        showSystemMessage('创建房间失败，服务器连接超时');
-        alert('创建房间失败，请检查网络连接或稍后重试');
-        showScreen('host-setup-screen');
-    }, 15000); // 15秒超时
-    
-    peer.on('open', (id) => {
-        clearTimeout(peerTimeout);
-        console.log('Room created with ID:', id);
-        peerId = id;
-        
-        // 更新服务器状态
-        updateServerStatus(0, 'connected');
-        
-        // 设置房间ID显示
-        const roomIdDisplay = document.getElementById('room-id-display');
-        roomIdDisplay.textContent = id;
-        
-        // 自动复制ID到剪贴板
-        try {
-            navigator.clipboard.writeText(id).then(() => {
-                showSystemMessage('房间ID已自动复制到剪贴板');
-            }).catch(err => {
-                console.error('Failed to auto-copy room ID:', err);
-            });
-        } catch (err) {
-            console.error('Clipboard API not available:', err);
-        }
-        
-        // 设置房间名称显示
-        document.getElementById('host-room-name').textContent = `房间: ${roomName}`;
-        
-        // 添加主持人到参与者列表
-        participants[id] = {
-            name: userName,
-            isHost: true
+        // 添加到参与者列表
+        participants[message.from] = {
+            name: message.name,
+            isHost: false,
+            raisedHand: false
         };
         
         // 更新参与者列表显示
         updateParticipantsList();
         
-        // 更新规则显示
-        updateRulesList();
+        // 发送系统消息
+        showSystemMessage(`${message.name} 加入了房间`);
         
-        // 显示欢迎消息
-        showSystemMessage(`房间 "${roomName}" 已创建，等待参与者加入...`);
-        showSystemMessage(`请将房间ID: ${id} 分享给参与者`);
-        showSystemMessage(`已连接到服务器: ${serverConfig.host}`);
-        
-        // 更新连接状态
-        updateConnectionStatus('connected', true);
-        
-        // 设置连接事件监听
-        setupPeerEvents();
+        // 确认参与者加入
+        apiClient.confirmJoin(message.from, true, peerId)
+            .then(() => {
+                console.log('已确认参与者加入:', message.from);
+            })
+            .catch(error => {
+                console.error('确认参与者加入失败:', error);
+            });
     });
     
-    peer.on('error', (err) => {
-        clearTimeout(peerTimeout);
-        console.error('PeerJS error:', err);
-        
-        // 更新服务器状态
-        updateServerStatus(0, 'failed');
-        
-        // 检查是否是ID已被占用错误
-        if (err.type === 'unavailable-id') {
-            // ID被占用，重新尝试创建房间
-            tryCreateRoom();
-            return;
+    // 处理消息
+    apiClient.onMessage('message', message => {
+        const participant = participants[message.from];
+        if (participant) {
+            showChatMessage(participant.name, message.content, 'guest');
         }
-        
-        // 其他类型错误
-        resetPeerServerIndex();
-        showSystemMessage(`创建房间失败: ${err.type}`);
-        alert('创建房间失败，请检查网络连接或稍后重试');
-        showScreen('host-setup-screen');
-    });
-}
-
-/**
- * 设置PeerJS事件监听
- */
-function setupPeerEvents() {
-    if (!peer) return;
-    
-    peer.on('connection', handleNewConnection);
-    
-    peer.on('disconnected', () => {
-        console.log('Peer disconnected');
-        updateConnectionStatus('connecting', true);
-        showSystemMessage('与服务器断开连接，尝试重新连接...');
-        
-        // 尝试重新连接
-        setTimeout(() => {
-            if (peer) {
-                peer.reconnect();
-            }
-        }, 3000);
-        
-        // 如果长时间未重连成功，提示用户
-        setTimeout(() => {
-            if (peer && peer.disconnected) {
-                showSystemMessage('重连失败，请刷新页面重试');
-            }
-        }, 10000);
     });
     
-    peer.on('close', () => {
-        console.log('Peer connection closed');
-        connections = {};
-        updateConnectionStatus('disconnected', true);
-        showSystemMessage('连接已关闭');
+    // 处理举手
+    apiClient.onMessage('raise-hand', message => {
+        const participant = participants[message.from];
+        if (participant) {
+            participant.raisedHand = true;
+            updateParticipantsList();
+            showSystemMessage(`${participant.name} 举手了`);
+        }
+    });
+    
+    // 处理放下手
+    apiClient.onMessage('lower-hand', message => {
+        const participant = participants[message.from];
+        if (participant) {
+            participant.raisedHand = false;
+            updateParticipantsList();
+        }
+    });
+    
+    // 处理反应
+    apiClient.onMessage('reaction', message => {
+        const participant = participants[message.from];
+        if (participant) {
+            showSystemMessage(`${participant.name} ${message.content === '🌹' ? '送出了一朵鲜花' : '丢了一个垃圾'}`);
+        }
     });
 }
 

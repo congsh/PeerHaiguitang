@@ -7,343 +7,165 @@
  * 加入房间
  */
 function joinRoom() {
-    // 获取表单数据
+    // 获取房间ID和参与者名称
     const roomId = document.getElementById('room-id').value.trim().toUpperCase();
     userName = document.getElementById('guest-name').value.trim();
     
     // 验证输入
-    if (!roomId || !userName) {
-        alert('请填写房间ID和昵称');
+    if (!roomId) {
+        alert('请输入房间ID');
         return;
     }
     
-    // 验证房间ID格式（4-10位字母数字）
-    if (!/^[A-Z0-9]{4,10}$/.test(roomId)) {
-        alert('房间ID格式不正确，应为4-10位大写字母和数字');
+    if (!userName) {
+        alert('请输入你的名称');
         return;
     }
     
-    // 显示连接中状态
-    showScreen('guest-room-screen');
-    document.getElementById('guest-room-name').textContent = '正在连接...';
-    showSystemMessage('正在连接到房间...', 'guest-chat-messages');
-    updateConnectionStatus('connecting', false);
-    
-    // 初始化参与者
+    // 设置参与者身份
     isHost = false;
     
-    // 重置服务器索引
-    resetPeerServerIndex();
+    // 显示加入中状态
+    showScreen('guest-waiting-screen');
+    document.getElementById('guest-waiting-message').textContent = `正在加入房间: ${roomId}...`;
     
     // 尝试加入房间
     tryJoinRoom(roomId);
 }
 
 /**
- * 尝试使用当前服务器加入房间
+ * 尝试使用API加入房间
  * @param {string} roomId - 房间ID
  */
 function tryJoinRoom(roomId) {
-    // 由于我们只有一个服务器选项，简化连接逻辑
-    const serverConfig = peerServerOptions[0];
-    currentServerIndex = 0; // 确保使用第一个(也是唯一的)服务器
+    showSystemMessage('正在连接到服务器...', 'guest-chat-messages');
     
-    // 更新服务器状态指示器
-    updateServerStatus(0, 'connecting');
-    
-    showSystemMessage(`正在连接到PeerJS服务器 (${serverConfig.host})...`, 'guest-chat-messages');
-    
-    try {
-        // 如果已有Peer实例，先销毁
-        if (peer) {
-            peer.destroy();
-            peer = null;
-        }
-        
-        // 初始化PeerJS
-        peer = new Peer(null, {
-            debug: 3, // 提高调试级别
-            config: {
-                'iceServers': getStunServers()
-            },
-            pingInterval: 5000,
-            host: serverConfig.host,
-            port: serverConfig.port,
-            path: serverConfig.path,
-            secure: serverConfig.secure,
-            key: serverConfig.key
-        });
-        
-        // 设置PeerJS连接超时
-        const peerTimeout = setTimeout(() => {
-            if (peer && !peerId) {
-                if (peer) {
-                    peer.destroy();
-                    peer = null;
-                }
-                
-                // 更新服务器状态
-                updateServerStatus(0, 'failed');
-                resetPeerServerIndex();
-                showSystemMessage('连接服务器超时，请检查网络连接', 'guest-chat-messages');
-                alert('连接失败，请检查网络连接或稍后重试');
-                showScreen('guest-setup-screen');
-            }
-        }, 15000); // 15秒超时
-        
-        // 设置PeerJS事件监听
-        peer.on('open', (myPeerId) => {
-            clearTimeout(peerTimeout);
-            console.log('My peer ID is:', myPeerId);
-            peerId = myPeerId;
+    // 使用API客户端加入房间
+    apiClient.joinRoom(roomId, userName)
+        .then(room => {
+            console.log('成功加入房间:', room);
             
-            // 更新服务器状态
-            updateServerStatus(0, 'connected');
+            // 保存房间信息
+            roomName = room.name;
+            roomRules = room.rules;
             
-            showSystemMessage(`已连接到服务器: ${serverConfig.host}`, 'guest-chat-messages');
-            showSystemMessage(`正在连接到房间: ${roomId}...`, 'guest-chat-messages');
+            // 保存房间ID
+            peerId = roomId;
             
-            connectToHost(roomId, myPeerId);
-        });
-        
-        peer.on('error', (err) => {
-            clearTimeout(peerTimeout);
-            console.error('PeerJS error:', err);
+            // 保存主持人ID
+            hostId = room.host;
             
-            // 更新服务器状态
-            updateServerStatus(0, 'failed');
+            // 设置参与者列表
+            participants = {};
+            room.participants.forEach(p => {
+                participants[p.id] = {
+                    name: p.name,
+                    isHost: p.isHost,
+                    raisedHand: p.raisedHand || false
+                };
+            });
             
-            if (err.type === 'peer-unavailable') {
-                showSystemMessage('找不到指定的房间，请检查房间ID是否正确', 'guest-chat-messages');
-                setTimeout(() => {
-                    alert('找不到指定的房间，请检查房间ID后重试');
-                    showScreen('guest-setup-screen');
-                }, 1000);
-                return;
-            }
+            // 更新参与者列表显示
+            updateParticipantsList('guest-participants-list');
             
-            // 其他类型错误
-            showSystemMessage(`连接错误: ${err.type}`, 'guest-chat-messages');
-            setTimeout(() => {
-                alert(`连接错误: ${err.type}`);
-                showScreen('guest-setup-screen');
-            }, 1000);
-        });
-    } catch (error) {
-        console.error('Setup error:', error);
-        showSystemMessage(`设置错误: ${error.message}`, 'guest-chat-messages');
-        updateConnectionStatus('disconnected', false);
-        
-        setTimeout(() => {
-            alert(`设置错误: ${error.message}`);
-            showScreen('guest-setup-screen');
-        }, 1000);
-    }
-}
-
-/**
- * 连接到主持人
- * @param {string} roomId - 房间ID
- * @param {string} myPeerId - 我的Peer ID
- */
-function connectToHost(roomId, myPeerId) {
-    try {
-        // 连接到主持人
-        hostConnection = peer.connect(roomId, {
-            metadata: {
-                name: userName,
-                peerId: myPeerId
-            },
-            reliable: true
-        });
-        
-        if (!hostConnection) {
-            throw new Error('无法创建连接');
-        }
-        
-        // 设置连接超时
-        const connectionTimeout = setTimeout(() => {
-            if (hostConnection && !hostConnection.open) {
-                showSystemMessage('连接到房间超时，可能是网络问题或房间ID不正确', 'guest-chat-messages');
-                alert('连接超时，请检查房间ID是否正确');
-                resetState();
-                showScreen('guest-setup-screen');
-            }
-        }, 10000); // 10秒超时
-        
-        hostConnection.on('open', () => {
-            clearTimeout(connectionTimeout);
-            console.log('Connected to host');
+            // 更新规则显示
+            updateGuestRulesList();
+            
+            // 显示等待确认消息
+            showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
+            
+            // 更新连接状态
             updateConnectionStatus('connected', false);
             
-            // 发送加入请求
-            const joinRequest = {
-                type: 'join-request',
-                name: userName,
-                peerId: myPeerId,
-                timestamp: Date.now() // 添加时间戳避免消息被认为是重复
-            };
-            
-            console.log('发送加入请求:', joinRequest);
-            hostConnection.send(joinRequest);
-            
-            // 设置确认超时
-            let confirmationTimeout = setTimeout(() => {
-                console.log('确认超时，重试发送加入请求');
-                joinRequest.timestamp = Date.now(); // 更新时间戳
-                hostConnection.send(joinRequest);
-                
-                // 第二次超时后提示用户
-                confirmationTimeout = setTimeout(() => {
-                    console.log('确认再次超时，提示用户');
-                    showSystemMessage('主持人未确认加入请求，可能是网络问题', 'guest-chat-messages');
-                    alert('连接已建立但主持人未响应，请尝试重新加入或联系主持人');
-                }, 10000);
-            }, 5000);
-            
-            // 保存确认超时引用以便在收到确认后清除
-            hostConnection.confirmationTimeout = confirmationTimeout;
-            
-            // 显示欢迎消息
-            showSystemMessage('已连接到房间，等待主持人确认...', 'guest-chat-messages');
-        });
-        
-        hostConnection.on('data', handleHostData);
-        
-        hostConnection.on('close', () => {
-            console.log('Connection to host closed');
-            updateConnectionStatus('disconnected', false);
-            showSystemMessage('与主持人的连接已关闭', 'guest-chat-messages');
-            
-            // 返回欢迎界面
-            setTimeout(() => {
-                alert('房间已关闭或主持人已离开');
-                showScreen('welcome-screen');
-            }, 1000);
-        });
-        
-        hostConnection.on('error', (err) => {
-            console.error('Connection to host error:', err);
-            updateConnectionStatus('disconnected', false);
-            showSystemMessage(`连接错误: ${err}`, 'guest-chat-messages');
-            
-            setTimeout(() => {
-                alert('连接错误，请检查房间ID后重试');
-                showScreen('guest-setup-screen');
-            }, 1000);
-        });
-    } catch (error) {
-        console.error('Failed to establish connection:', error);
-        showSystemMessage(`连接错误: ${error.message}`, 'guest-chat-messages');
-        updateConnectionStatus('disconnected', false);
-        
-        setTimeout(() => {
-            alert(`连接错误: ${error.message}`);
+            // 设置消息处理
+            setupGuestMessageHandlers();
+        })
+        .catch(error => {
+            console.error('加入房间失败:', error);
+            showSystemMessage(`加入房间失败: ${error.message}`, 'guest-chat-messages');
+            alert('加入房间失败，请检查房间ID是否正确');
             showScreen('guest-setup-screen');
-        }, 1000);
-    }
+        });
 }
 
 /**
- * 处理来自主持人的数据
- * @param {Object} data - 主持人发送的数据
+ * 设置参与者消息处理函数
  */
-function handleHostData(data) {
-    console.log('Received data from host:', data);
-    
-    switch (data.type) {
-        case 'room-info':
-            // 处理房间信息
-            handleRoomInfo(data);
-            break;
-            
-        case 'join-confirmed':
-            // 处理加入确认
-            console.log('收到加入确认消息');
-            // 清除确认超时定时器
-            if (hostConnection && hostConnection.confirmationTimeout) {
-                clearTimeout(hostConnection.confirmationTimeout);
-                hostConnection.confirmationTimeout = null;
-            }
+function setupGuestMessageHandlers() {
+    // 处理加入确认
+    apiClient.onMessage('join-response', message => {
+        console.log('收到加入确认:', message);
+        
+        if (message.approved) {
+            // 加入成功
             showSystemMessage('主持人已确认你的加入请求', 'guest-chat-messages');
             showScreen('guest-room-screen');
-            document.getElementById('guest-room-name').textContent = `房间: ${data.roomName}`;
-            break;
-            
-        case 'participants-update':
-            // 更新参与者列表
-            participants = data.participants;
-            updateParticipantsList('guest-participants-list');
-            break;
-            
-        case 'puzzle':
-            // 接收谜题
-            document.getElementById('guest-puzzle-display').textContent = data.content;
-            showSystemMessage('主持人发布了新谜题', 'guest-chat-messages');
-            break;
-            
-        case 'intel':
-            // 接收情报
-            const intelDisplay = document.getElementById('guest-intel-display');
-            intelDisplay.textContent = intelDisplay.textContent 
-                ? intelDisplay.textContent + '\n\n' + data.content 
-                : data.content;
-            showSystemMessage('主持人发布了新情报', 'guest-chat-messages');
-            break;
-            
-        case 'host-response':
-            // 处理主持人回应
-            handleHostResponse(data);
-            break;
-            
-        case 'question-from-other':
-            // 其他参与者的问题
-            showChatMessage(data.sender, data.question, 'guest', 'guest-chat-messages');
-            break;
-            
-        case 'game-end':
-            // 游戏结束
-            showSystemMessage('主持人结束了游戏', 'guest-chat-messages');
-            gameStarted = false;
-            break;
-            
-        case 'game-continue':
-            // 游戏继续
-            showSystemMessage('主持人继续了游戏', 'guest-chat-messages');
-            gameStarted = true;
-            break;
-            
-        case 'reaction':
-            // 处理其他参与者的反应
-            showSystemMessage(`${data.sender} ${data.reaction === '🌹' ? '送出了一朵鲜花' : '丢了一个垃圾'}`, 'guest-chat-messages');
-            break;
-    }
-}
-
-/**
- * 处理房间信息
- * @param {Object} data - 房间信息数据
- */
-function handleRoomInfo(data) {
-    roomName = data.roomName;
-    roomRules = data.rules;
-    participants = data.participants;
+            document.getElementById('guest-room-name').textContent = `房间: ${roomName}`;
+        } else {
+            // 被拒绝
+            showSystemMessage('主持人拒绝了你的加入请求', 'guest-chat-messages');
+            alert('主持人拒绝了你的加入请求');
+            showScreen('guest-setup-screen');
+        }
+    });
     
-    // 更新房间名称显示
-    document.getElementById('guest-room-name').textContent = `房间: ${roomName}`;
+    // 处理房间更新
+    apiClient.onMessage('room-update', message => {
+        console.log('收到房间更新:', message);
+        
+        // 更新参与者列表
+        participants = message.content.participants;
+        updateParticipantsList('guest-participants-list');
+    });
     
-    // 更新参与者列表
-    updateParticipantsList('guest-participants-list');
+    // 处理谜题
+    apiClient.onMessage('puzzle', message => {
+        console.log('收到谜题:', message);
+        document.getElementById('guest-puzzle-display').textContent = message.content;
+        showSystemMessage('主持人发布了新谜题', 'guest-chat-messages');
+    });
     
-    // 更新规则列表
-    updateGuestRulesList();
+    // 处理情报
+    apiClient.onMessage('intel', message => {
+        console.log('收到情报:', message);
+        const intelDisplay = document.getElementById('guest-intel-display');
+        intelDisplay.textContent = intelDisplay.textContent 
+            ? intelDisplay.textContent + '\n\n' + message.content 
+            : message.content;
+        showSystemMessage('主持人发布了新情报', 'guest-chat-messages');
+    });
     
-    // 显示欢迎消息
-    showSystemMessage(`欢迎加入房间 "${roomName}"`, 'guest-chat-messages');
-    showSystemMessage(`主持人: ${data.hostName}`, 'guest-chat-messages');
+    // 处理主持人回应
+    apiClient.onMessage('host-response', message => {
+        console.log('收到主持人回应:', message);
+        showChatMessage('主持人', message.content, 'host', 'guest-chat-messages');
+    });
     
-    // 加载笔记
-    loadNotes();
+    // 处理其他参与者的问题
+    apiClient.onMessage('question-from-other', message => {
+        console.log('收到其他参与者问题:', message);
+        showChatMessage(message.sender, message.content, 'guest', 'guest-chat-messages');
+    });
+    
+    // 处理游戏结束
+    apiClient.onMessage('game-end', message => {
+        console.log('收到游戏结束消息:', message);
+        showSystemMessage('主持人结束了游戏', 'guest-chat-messages');
+        gameStarted = false;
+    });
+    
+    // 处理游戏继续
+    apiClient.onMessage('game-continue', message => {
+        console.log('收到游戏继续消息:', message);
+        showSystemMessage('主持人继续了游戏', 'guest-chat-messages');
+        gameStarted = true;
+    });
+    
+    // 处理反应
+    apiClient.onMessage('reaction', message => {
+        console.log('收到反应:', message);
+        showSystemMessage(`${message.sender} ${message.content === '🌹' ? '送出了一朵鲜花' : '丢了一个垃圾'}`, 'guest-chat-messages');
+    });
 }
 
 /**
@@ -433,15 +255,6 @@ function getInteractionMethodName(method) {
         case 'disabled': return '禁止互动';
         default: return '未知';
     }
-}
-
-/**
- * 处理主持人回应
- * @param {Object} data - 主持人回应数据
- */
-function handleHostResponse(data) {
-    // 显示主持人回应
-    showChatMessage('主持人', data.response, 'host', 'guest-chat-messages');
 }
 
 /**

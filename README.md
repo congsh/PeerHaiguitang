@@ -59,4 +59,95 @@
 
 - 需要现代浏览器支持（Chrome、Firefox、Safari等）
 - 主持人作为服务器，需要保持在线状态
-- 某些网络环境（如严格的防火墙）可能会阻止P2P连接 
+- 某些网络环境（如严格的防火墙）可能会阻止P2P连接
+
+## 部署说明
+
+### 1. 基本部署
+
+将所有文件上传到您的Web服务器即可。该应用是纯静态的，不需要后端支持。
+
+### 2. 自托管PeerJS服务器（推荐）
+
+为解决外网NAT穿透问题，强烈推荐自托管PeerJS服务器。
+
+#### 步骤一：安装PeerJS服务器
+
+```bash
+# 安装Node.js和npm
+# 然后安装PeerJS服务器
+npm install -g peer
+
+# 运行服务器（默认端口9000）
+peer --port 9000
+```
+
+#### 步骤二：配置PeerJS服务器
+
+如果您在自己的服务器上运行PeerJS，请修改`js/config.js`文件：
+
+```javascript
+const peerServerOptions = [
+    {
+        host: '您的服务器IP或域名',
+        port: 9000, // 或其他端口
+        path: '/',
+        secure: false, // 如果使用HTTPS则设为true
+        key: 'peerjs'
+    }
+];
+```
+
+#### 步骤三：配置HTTPS（可选但推荐）
+
+为了在生产环境中使用WebRTC，建议配置HTTPS。可以使用Nginx或Caddy等工具作为反向代理，并配置SSL证书。
+
+```
+# Nginx配置示例
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        root /path/to/app;
+        index index.html;
+    }
+
+    location /peerjs {
+        proxy_pass http://localhost:9000;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+### 3. 使用公共TURN服务器
+
+如果您无法自托管PeerJS服务器，可以使用公共TURN服务器作为备选方案。我们已经在配置中添加了一些公共TURN服务器，但这些服务器可能不够稳定或有连接限制。
+
+对于更可靠的生产环境，建议使用如下商业TURN服务：
+- [Twilio TURN服务](https://www.twilio.com/stun-turn)
+- [XirSys](https://xirsys.com/)
+
+## 常见问题
+
+### 外网连接问题
+
+如果您在外网环境下遇到连接问题，可能是由以下原因导致：
+
+1. NAT类型限制：对称型NAT（Symmetric NAT）通常难以直接建立P2P连接
+2. 防火墙限制：某些企业或校园网络可能阻止WebRTC流量
+3. 服务器不可用：PeerJS公共服务器可能不稳定
+
+解决方案：
+
+1. 使用自托管PeerJS服务器
+2. 确保配置了足够的TURN服务器
+3. 考虑使用VPN或其他网络环境测试 

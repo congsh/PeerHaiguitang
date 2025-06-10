@@ -1,0 +1,417 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+}
+
+body {
+    background-color: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+h1, h2, h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+}
+
+.btn {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s;
+    margin: 5px;
+}
+
+.btn:hover {
+    background-color: #2980b9;
+}
+
+.btn-back {
+    background-color: #95a5a6;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.3s;
+    margin-top: 10px;
+}
+
+.btn-back:hover {
+    background-color: #7f8c8d;
+}
+
+.btn-small {
+    background-color: #3498db;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.3s;
+}
+
+.btn-small:hover {
+    background-color: #2980b9;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.screen {
+    display: none;
+    padding: 20px;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+}
+
+.screen.active {
+    display: block;
+}
+
+/* 欢迎界面 */
+#welcome-screen {
+    text-align: center;
+    padding: 50px 20px;
+}
+
+#welcome-screen h1 {
+    font-size: 2.5em;
+    margin-bottom: 30px;
+    color: #2c3e50;
+}
+
+.role-selection {
+    margin-top: 30px;
+}
+
+.role-selection .btn {
+    margin: 10px;
+    padding: 15px 30px;
+    font-size: 18px;
+}
+
+/* 表单样式 */
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+.rules-setup {
+    background-color: #f9f9f9;
+    padding: 15px;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
+
+/* 房间界面 */
+.room-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.room-content {
+    display: flex;
+    gap: 20px;
+}
+
+.sidebar {
+    width: 30%;
+    background-color: #f9f9f9;
+    padding: 15px;
+    border-radius: 4px;
+}
+
+.main-area {
+    width: 70%;
+}
+
+.participants-list, .rules-display, .notes-section {
+    margin-bottom: 20px;
+}
+
+.participants-list ul, .rules-display ul {
+    list-style-type: none;
+}
+
+.participants-list li, .rules-display li {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+/* 聊天区域 */
+.chat-section {
+    margin-top: 20px;
+}
+
+.chat-messages {
+    height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    background-color: #fff;
+}
+
+.chat-input {
+    display: flex;
+    gap: 10px;
+}
+
+.chat-input input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+.host-response-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.response-btn {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: background-color 0.3s;
+}
+
+#yes-btn {
+    background-color: #2ecc71;
+    color: white;
+}
+
+#yes-btn:hover {
+    background-color: #27ae60;
+}
+
+#no-btn {
+    background-color: #e74c3c;
+    color: white;
+}
+
+#no-btn:hover {
+    background-color: #c0392b;
+}
+
+#uncertain-btn {
+    background-color: #f39c12;
+    color: white;
+}
+
+#uncertain-btn:hover {
+    background-color: #d35400;
+}
+
+/* 谜题和情报区域 */
+.puzzle-section, .intel-section {
+    margin-bottom: 20px;
+}
+
+.puzzle-section textarea, .intel-section textarea {
+    width: 100%;
+    min-height: 100px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+    margin-bottom: 10px;
+}
+
+.content-box {
+    min-height: 100px;
+    padding: 15px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 15px;
+}
+
+.notes-section textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+/* 房间控制按钮 */
+.room-controls {
+    margin-top: 20px;
+    display: flex;
+    justify-content: space-between;
+}
+
+/* 消息样式 */
+.message {
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    max-width: 80%;
+}
+
+.message.host {
+    background-color: #d6eaf8;
+    align-self: flex-start;
+}
+
+.message.guest {
+    background-color: #eaeded;
+    align-self: flex-end;
+    margin-left: auto;
+}
+
+.message.system {
+    background-color: #fdebd0;
+    width: 100%;
+    text-align: center;
+    font-style: italic;
+}
+
+.message .sender {
+    font-weight: bold;
+    margin-bottom: 3px;
+}
+
+.message .content {
+    word-wrap: break-word;
+}
+
+.message .timestamp {
+    font-size: 12px;
+    color: #7f8c8d;
+    text-align: right;
+    margin-top: 3px;
+}
+
+/* 反应按钮 */
+.reaction-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.reaction-btn {
+    background-color: transparent;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 20px;
+    transition: transform 0.2s;
+}
+
+.reaction-btn:hover {
+    transform: scale(1.1);
+}
+
+/* 举手按钮 */
+#raise-hand-btn {
+    background-color: #9b59b6;
+    color: white;
+}
+
+#raise-hand-btn:hover {
+    background-color: #8e44ad;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .room-content {
+        flex-direction: column;
+    }
+    
+    .sidebar, .main-area {
+        width: 100%;
+    }
+    
+    .room-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .room-id-display {
+        margin-top: 10px;
+    }
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.8em;
+    color: #7f8c8d;
+    margin-top: 3px;
+    margin-bottom: 8px;
+}
+
+.room-id-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 5px;
+}
+
+.room-id-label {
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.room-id-value {
+    font-size: 1.3em;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: #2980b9;
+    background-color: #eef7fc;
+    border: 1px dashed #3498db;
+    padding: 5px 10px;
+    border-radius: 4px;
+    min-width: 100px;
+    text-align: center;
+} 

@@ -1,0 +1,26 @@
+[build]
+  publish = "/"
+  command = "echo 'No build command needed for static site'"
+
+# 重定向所有请求到 index.html 以支持单页应用
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# 设置缓存控制
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# 特别为 JavaScript 和 CSS 文件设置缓存
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable" 

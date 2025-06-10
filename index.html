@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>海龟汤互动房间</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        .connection-status {
+            margin-left: 15px;
+            font-size: 0.9em;
+        }
+        
+        .status-indicator {
+            padding: 3px 6px;
+            border-radius: 10px;
+            font-weight: bold;
+            background-color: #95a5a6;
+            color: white;
+        }
+        
+        .status-connected {
+            background-color: #2ecc71;
+        }
+        
+        .status-disconnected {
+            background-color: #e74c3c;
+        }
+        
+        .status-connecting {
+            background-color: #f39c12;
+        }
+        
+        .server-status {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            display: none;
+        }
+        
+        .server-status.active {
+            display: block;
+        }
+        
+        .server-status-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        
+        .server-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .server-item {
+            flex: 1;
+            min-width: 120px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: white;
+        }
+        
+        .server-name {
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        
+        .server-indicator {
+            font-size: 0.8em;
+            padding: 2px 5px;
+            border-radius: 3px;
+            background-color: #95a5a6;
+            color: white;
+            text-align: center;
+        }
+        
+        .server-connecting {
+            background-color: #f39c12;
+        }
+        
+        .server-connected {
+            background-color: #2ecc71;
+        }
+        
+        .server-failed {
+            background-color: #e74c3c;
+        }
+
+        /* 服务器状态样式 */
+        #server-status {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .server-status-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #495057;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 3px;
+        }
+        .server-item {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+        .server-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            background-color: #e9ecef;
+        }
+        .server-indicator.connecting {
+            background-color: #ffc107;
+            animation: blink 1s infinite;
+        }
+        .server-indicator.connected {
+            background-color: #28a745;
+        }
+        .server-indicator.failed {
+            background-color: #dc3545;
+        }
+        @keyframes blink {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; }
+            100% { opacity: 0.3; }
+        }
+
+        /* STUN服务器状态样式 */
+        .stun-status {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f1f8ff;
+            border-radius: 4px;
+            border-left: 3px solid #0366d6;
+        }
+        .stun-result {
+            margin-top: 5px;
+            color: #0366d6;
+        }
+        .connection-info {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #f6f8fa;
+            border-radius: 4px;
+            border-left: 3px solid #2ea44f;
+            color: #24292e;
+        }
+        .optimization-tip {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: #fff8c5;
+            border-radius: 4px;
+            border-left: 3px solid #b08800;
+        }
+        .optimization-tip div {
+            margin: 3px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="welcome-screen" class="screen active">
+            <h1>海龟汤互动房间</h1>
+            <div class="role-selection">
+                <button id="host-btn" class="btn">我是主持人</button>
+                <button id="guest-btn" class="btn">我是参与者</button>
+            </div>
+            <div id="server-status" class="server-status">
+                <div class="server-status-title">服务器连接状态:</div>
+                <div class="server-list">
+                    <div class="server-item" data-server="0">
+                        <div class="server-name">peerjs.com</div>
+                        <div class="server-indicator">待检测</div>
+                    </div>
+                    <div class="server-item" data-server="1">
+                        <div class="server-name">peerjsbin.com</div>
+                        <div class="server-indicator">待检测</div>
+                    </div>
+                    <div class="server-item" data-server="2">
+                        <div class="server-name">本地服务器</div>
+                        <div class="server-indicator">待检测</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 主持人创建房间界面 -->
+        <div id="host-setup-screen" class="screen">
+            <h2>创建海龟汤房间</h2>
+            <div class="form-group">
+                <label>房间名称:</label>
+                <input type="text" id="room-name" placeholder="给房间起个名字">
+            </div>
+            <div class="form-group">
+                <label>主持人昵称:</label>
+                <input type="text" id="host-name" placeholder="你的昵称">
+            </div>
+            <h3>房间规则设置</h3>
+            <div class="rules-setup">
+                <div class="form-group">
+                    <label for="soup-type">汤的类型:</label>
+                    <select id="soup-type" aria-label="选择汤的类型">
+                        <option value="regular">普通汤</option>
+                        <option value="red">红汤</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="scoring-method">打分方式:</label>
+                    <select id="scoring-method" aria-label="选择打分方式">
+                        <option value="host">仅主持人打分</option>
+                        <option value="all">所有人打分</option>
+                        <option value="none">不打分</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="answer-method">回答方式:</label>
+                    <select id="answer-method" aria-label="选择回答方式">
+                        <option value="free">自由回答</option>
+                        <option value="raise-hand">举手回答</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="interaction-method">互动方式:</label>
+                    <select id="interaction-method" aria-label="选择互动方式">
+                        <option value="enabled">允许丢鲜花和垃圾</option>
+                        <option value="disabled">不允许丢鲜花和垃圾</option>
+                    </select>
+                </div>
+            </div>
+            <button id="create-room-btn" class="btn">创建房间</button>
+            <button id="back-from-host" class="btn-back">返回</button>
+        </div>
+
+        <!-- 参与者加入房间界面 -->
+        <div id="guest-setup-screen" class="screen">
+            <h2>加入海龟汤房间</h2>
+            <div class="form-group">
+                <label for="room-id">房间ID:</label>
+                <input type="text" id="room-id" placeholder="输入4-10位大写字母和数字" maxlength="10" style="text-transform: uppercase;">
+                <small class="form-hint">房间ID为4-10位大写字母和数字</small>
+            </div>
+            <div class="form-group">
+                <label>你的昵称:</label>
+                <input type="text" id="guest-name" placeholder="输入你的昵称">
+            </div>
+            <button id="join-room-btn" class="btn">加入房间</button>
+            <button id="back-from-guest" class="btn-back">返回</button>
+        </div>
+
+        <!-- 主持人房间界面 -->
+        <div id="host-room-screen" class="screen">
+            <div class="room-header">
+                <h2 id="host-room-name">房间: </h2>
+                <div class="room-id-display">
+                    <div class="room-id-label">房间ID:</div>
+                    <div class="room-id-value" id="room-id-display"></div>
+                    <button id="copy-room-id" class="btn-small">复制</button>
+                    <span id="host-connection-status" class="connection-status">连接状态: <span class="status-indicator">初始化中</span></span>
+                </div>
+            </div>
+            <div class="room-content">
+                <div class="sidebar">
+                    <div class="participants-list">
+                        <h3>参与者列表</h3>
+                        <ul id="participants-list"></ul>
+                    </div>
+                    <div class="rules-display">
+                        <h3>房间规则</h3>
+                        <ul id="rules-list"></ul>
+                    </div>
+                </div>
+                <div class="main-area">
+                    <div class="puzzle-section">
+                        <h3>谜题设置</h3>
+                        <textarea id="puzzle-input" placeholder="在这里输入海龟汤谜题..."></textarea>
+                        <button id="publish-puzzle-btn" class="btn">发布谜题</button>
+                    </div>
+                    <div class="intel-section">
+                        <h3>发布情报</h3>
+                        <textarea id="intel-input" placeholder="在这里输入额外情报..."></textarea>
+                        <button id="publish-intel-btn" class="btn">发布情报</button>
+                    </div>
+                    <div class="chat-section">
+                        <div class="chat-messages" id="host-chat-messages">
+                            <!-- 聊天消息会动态添加到这里 -->
+                        </div>
+                        <div class="host-response-buttons">
+                            <button id="yes-btn" class="response-btn">是</button>
+                            <button id="no-btn" class="response-btn">否</button>
+                            <button id="uncertain-btn" class="response-btn">不确定</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="room-controls">
+                <button id="end-game-btn" class="btn">结束游戏</button>
+                <button id="continue-game-btn" class="btn">继续游戏</button>
+                <button id="leave-room-btn" class="btn-danger">离开房间</button>
+            </div>
+        </div>
+
+        <!-- 参与者房间界面 -->
+        <div id="guest-room-screen" class="screen">
+            <div class="room-header">
+                <h2 id="guest-room-name">房间: </h2>
+                <div class="host-info">
+                    主持人: <span id="host-info-display"></span>
+                    <span id="guest-connection-status" class="connection-status">连接状态: <span class="status-indicator">初始化中</span></span>
+                </div>
+            </div>
+            <div class="room-content">
+                <div class="sidebar">
+                    <div class="participants-list">
+                        <h3>参与者列表</h3>
+                        <ul id="guest-participants-list"></ul>
+                    </div>
+                    <div class="rules-display">
+                        <h3>房间规则</h3>
+                        <ul id="guest-rules-list"></ul>
+                    </div>
+                    <div class="notes-section">
+                        <h3>个人笔记</h3>
+                        <textarea id="personal-notes" placeholder="在这里记录笔记..."></textarea>
+                    </div>
+                </div>
+                <div class="main-area">
+                    <div class="puzzle-display">
+                        <h3>谜题</h3>
+                        <div id="puzzle-display" class="content-box"></div>
+                    </div>
+                    <div class="intel-display">
+                        <h3>主持人情报</h3>
+                        <div id="intel-display" class="content-box"></div>
+                    </div>
+                    <div class="chat-section">
+                        <div class="chat-messages" id="guest-chat-messages">
+                            <!-- 聊天消息会动态添加到这里 -->
+                        </div>
+                        <div class="chat-input">
+                            <input type="text" id="question-input" placeholder="输入你的问题...">
+                            <button id="send-question-btn" class="btn">发送</button>
+                            <button id="raise-hand-btn" class="btn" style="display: none;">举手</button>
+                        </div>
+                        <div class="reaction-buttons" id="reaction-buttons">
+                            <button id="flower-btn" class="reaction-btn">🌹</button>
+                            <button id="trash-btn" class="reaction-btn">🗑️</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="room-controls">
+                <button id="guest-leave-room-btn" class="btn-danger">离开房间</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script src="js/host-functions.js"></script>
+    <script src="js/guest-functions.js"></script>
+    <script src="js/message-handler.js"></script>
+</body>
+</html> 

@@ -37,6 +37,15 @@ class ApiClient {
         // 轮询定时器
         this.pollTimer = null;
         
+        // 是否使用本地模式（当服务器不可用时）
+        this.useLocalMock = true;
+        
+        // 本地存储的房间数据
+        this.localRooms = {};
+        
+        // 本地消息队列
+        this.localMessages = {};
+        
         console.log('API客户端初始化，客户端ID:', this.clientId);
     }
     
@@ -46,6 +55,11 @@ class ApiClient {
      * @returns {Promise<Object>} - 响应数据
      */
     async sendRequest(data) {
+        // 如果使用本地模式，则使用本地模拟
+        if (this.useLocalMock) {
+            return this.mockRequest(data);
+        }
+        
         try {
             const response = await fetch(this.baseUrl + '/room-manager', {
                 method: 'POST',
@@ -65,8 +79,163 @@ class ApiClient {
             return await response.json();
         } catch (error) {
             console.error('API请求错误:', error);
-            throw error;
+            
+            // 如果服务器请求失败，切换到本地模式
+            this.useLocalMock = true;
+            console.warn('切换到本地模式');
+            
+            // 重试请求（使用本地模式）
+            return this.mockRequest(data);
         }
+    }
+    
+    /**
+     * 本地模拟请求处理
+     * @param {Object} data - 请求数据
+     * @returns {Promise<Object>} - 响应数据
+     */
+    async mockRequest(data) {
+        console.log('使用本地模式处理请求:', data);
+        
+        // 模拟网络延迟
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const { action, roomId, peerId = this.clientId } = data;
+        
+        switch (action) {
+            case 'ping':
+                return { success: true };
+                
+            case 'create-room':
+                // 创建房间
+                const roomData = {
+                    host: peerId,
+                    name: data.data.roomName,
+                    rules: data.data.rules,
+                    participants: [{ 
+                        id: peerId, 
+                        name: data.data.hostName, 
+                        isHost: true 
+                    }],
+                    created: Date.now()
+                };
+                
+                this.localRooms[roomId] = roomData;
+                return { success: true, roomId };
+                
+            case 'join-room':
+                // 加入房间
+                if (!this.localRooms[roomId]) {
+                    return { 
+                        success: false, 
+                        error: '找不到房间' 
+                    };
+                }
+                
+                // 添加参与者
+                const room = this.localRooms[roomId];
+                room.participants.push({ 
+                    id: peerId, 
+                    name: data.data.name, 
+                    isHost: false 
+                });
+                
+                // 发送加入请求消息给主持人
+                this.addLocalMessage(room.host, {
+                    type: 'join-request',
+                    from: peerId,
+                    name: data.data.name,
+                    timestamp: Date.now()
+                });
+                
+                return { success: true, room };
+                
+            case 'check-messages':
+                // 检查消息
+                return { 
+                    success: true, 
+                    messages: this.localMessages[peerId] || [] 
+                };
+                
+            case 'ack-messages':
+                // 确认消息
+                this.localMessages[peerId] = [];
+                return { success: true };
+                
+            case 'confirm-join':
+                // 确认加入
+                const { participantId, approved } = data.data;
+                
+                // 发送确认消息给参与者
+                this.addLocalMessage(participantId, {
+                    type: 'join-response',
+                    approved,
+                    roomId,
+                    from: peerId,
+                    timestamp: Date.now()
+                });
+                
+                return { success: true };
+                
+            case 'send-message':
+                // 发送消息
+                const { to, message } = data.data;
+                
+                // 添加消息到接收者的队列
+                this.addLocalMessage(to, {
+                    type: 'message',
+                    from: peerId,
+                    content: message,
+                    timestamp: Date.now()
+                });
+                
+                return { success: true };
+                
+            case 'broadcast-message':
+                // 广播消息
+                if (!this.localRooms[roomId]) {
+                    return { 
+                        success: false, 
+                        error: '找不到房间' 
+                    };
+                }
+                
+                // 向所有参与者发送消息
+                const { type, content } = data.data;
+                const targetRoom = this.localRooms[roomId];
+                
+                targetRoom.participants.forEach(p => {
+                    if (p.id !== peerId) {
+                        this.addLocalMessage(p.id, {
+                            type: type || 'broadcast',
+                            from: peerId,
+                            roomId,
+                            content,
+                            timestamp: Date.now()
+                        });
+                    }
+                });
+                
+                return { success: true };
+                
+            default:
+                return { 
+                    success: false, 
+                    error: '未知操作' 
+                };
+        }
+    }
+    
+    /**
+     * 添加本地消息
+     * @param {string} to - 接收者ID
+     * @param {Object} message - 消息对象
+     */
+    addLocalMessage(to, message) {
+        if (!this.localMessages[to]) {
+            this.localMessages[to] = [];
+        }
+        this.localMessages[to].push(message);
     }
     
     /**

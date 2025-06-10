@@ -1,14 +1,12 @@
 /**
  * 海龟汤互动房间应用
- * 基于PeerJS实现P2P通信
+ * 基于服务器API实现实时通信
  * 主应用入口文件
  */
 
 // 全局变量
-let peer; // PeerJS实例
-let peerId; // 当前用户的PeerID
-let connections = {}; // 保存所有连接 {peerId: connection}
-let hostConnection; // 参与者连接到主持人的连接
+let peerId; // 当前用户的ID
+let hostId; // 主持人ID
 let isHost = false; // 是否为主持人
 let userName = ''; // 用户昵称
 let roomName = ''; // 房间名称
@@ -17,7 +15,6 @@ let participants = {}; // 参与者列表 {peerId: {name, ...}}
 let notes = ''; // 个人笔记
 let currentPuzzle = ''; // 当前谜题
 let gameStarted = false; // 游戏是否已开始
-let raisedHands = []; // 举手列表
 
 // DOM元素初始化
 document.addEventListener('DOMContentLoaded', () => {

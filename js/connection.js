@@ -230,6 +230,153 @@ function handleNewConnection(conn) {
  * 测试服务器连接
  */
 function testServerConnections() {
+    const serverStatus = document.getElementById('server-status');
+    if (!serverStatus) return;
+    
+    // 显示状态面板
+    serverStatus.classList.add('active');
+    
+    // 更新服务器状态
+    const serverItem = document.querySelector('.server-item');
+    if (serverItem) {
+        const indicator = serverItem.querySelector('.server-indicator');
+        if (indicator) {
+            // 先显示为连接中
+            indicator.textContent = '测试中...';
+            indicator.className = 'server-indicator server-connecting';
+            
+            // 测试API服务器连接
+            fetch('/api/room-manager', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    action: 'ping',
+                    peerId: apiClient.clientId
+                })
+            })
+            .then(response => {
+                if (response.ok) {
+                    // 连接成功
+                    indicator.textContent = '可用';
+                    indicator.className = 'server-indicator server-connected';
+                    return;
+                }
+                throw new Error('服务器响应错误');
+            })
+            .catch(error => {
+                console.error('测试服务器连接失败:', error);
+                // 连接失败
+                indicator.textContent = '不可用';
+                indicator.className = 'server-indicator server-failed';
+                
+                // 在状态面板中显示错误信息
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'server-error';
+                errorDiv.innerHTML = `
+                    <div class="server-status-title">服务器不可用</div>
+                    <div>API服务器连接失败，将使用本地模式。某些功能可能不可用。</div>
+                    <div class="error-details">错误信息: ${error.message}</div>
+                `;
+                serverStatus.appendChild(errorDiv);
+                
+                // 切换到本地模式
+                apiClient.useLocalMock = true;
+            });
+        }
+    }
+    
+    // 添加网络信息
+    try {
+        if (navigator.connection) {
+            const connectionInfo = document.createElement('div');
+            connectionInfo.classList.add('connection-info');
+            connectionInfo.innerHTML = `
+                <div class="server-status-title">网络连接信息</div>
+                <div>连接类型: ${navigator.connection.type || '未知'}</div>
+                <div>网络下行速度: ${(navigator.connection.downlink || 0).toFixed(1)} Mbps</div>
+                <div>网络延迟: ${navigator.connection.rtt || '未知'} ms</div>
+            `;
+            serverStatus.appendChild(connectionInfo);
+        }
+    } catch (e) {
+        console.error('获取网络信息失败:', e);
+    }
+}
+
+/**
+ * 更新服务器状态显示
+ * @param {number} index - 服务器索引
+ * @param {string} status - 状态: 'connecting', 'connected', 'failed'
+ */
+function updateServerStatus(index, status) {
+    const serverItem = document.querySelector(`.server-item[data-server="${index}"]`);
+    if (!serverItem) return;
+    
+    const indicator = serverItem.querySelector('.server-indicator');
+    if (!indicator) return;
+    
+    // 移除所有状态类
+    indicator.classList.remove('server-connecting', 'server-connected', 'server-failed');
+    
+    // 添加新的状态类
+    indicator.classList.add(`server-${status}`);
+    
+    // 更新文本
+    switch (status) {
+        case 'connecting':
+            indicator.textContent = '连接中...';
+            break;
+        case 'connected':
+            indicator.textContent = '已连接';
+            break;
+        case 'failed':
+            indicator.textContent = '连接失败';
+            break;
+        default:
+            indicator.textContent = '未知状态';
+    }
+}
+
+/**
+ * 更新连接状态显示
+ * @param {string} status - 状态: 'connecting', 'connected', 'disconnected'
+ * @param {boolean} isHost - 是否为主持人
+ */
+function updateConnectionStatus(status, isHost) {
+    const statusIndicator = document.querySelector(
+        isHost ? '.host-connection-status .status-indicator' : '.guest-connection-status .status-indicator'
+    );
+    
+    if (!statusIndicator) return;
+    
+    // 移除所有状态类
+    statusIndicator.classList.remove('status-connecting', 'status-connected', 'status-disconnected');
+    
+    // 添加新的状态类
+    statusIndicator.classList.add(`status-${status}`);
+    
+    // 更新文本
+    switch (status) {
+        case 'connecting':
+            statusIndicator.textContent = '连接中...';
+            break;
+        case 'connected':
+            statusIndicator.textContent = '已连接';
+            break;
+        case 'disconnected':
+            statusIndicator.textContent = '未连接';
+            break;
+        default:
+            statusIndicator.textContent = '未知状态';
+    }
+}
+
+/**
+ * 测试服务器连接
+ */
+function testServerConnections() {
     resetServerStatus();
     document.getElementById('server-status').classList.add('active');
     

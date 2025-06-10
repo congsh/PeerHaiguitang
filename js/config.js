@@ -4,18 +4,12 @@
  */
 
 /**
- * PeerJS服务器选项列表
+ * API配置
  */
-const peerServerOptions = [
-    // 使用0.peerjs.com作为唯一服务器选项
-    {
-        host: '0.peerjs.com',
-        port: 443,
-        path: '/',
-        secure: true,
-        key: 'peerjs'
-    }
-];
+const apiConfig = {
+    basePath: '/api',
+    pollingInterval: 2000 // 消息轮询间隔，毫秒
+};
 
 /**
  * 获取扩展的STUN服务器列表

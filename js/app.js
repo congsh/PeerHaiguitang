@@ -21,10 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 添加事件监听器
     initEventListeners();
     
-    // 测试服务器连接
-    setTimeout(() => {
-        testServerConnections();
-    }, 1000);
+    // API客户端会自动检测服务器可用性
+    console.log('应用初始化完成');
 });
 
 /**

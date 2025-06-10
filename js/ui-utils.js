@@ -147,16 +147,16 @@ function updateServerStatus(serverIndex, status) {
  * 重置所有服务器状态指示器
  */
 function resetServerStatus() {
-    for (let i = 0; i < peerServerOptions.length; i++) {
-        const serverItem = document.querySelector(`.server-item[data-server="${i}"]`);
-        if (!serverItem) continue;
-        
+    // 查找服务器状态项
+    const serverItems = document.querySelectorAll('.server-item');
+    
+    serverItems.forEach(serverItem => {
         const indicator = serverItem.querySelector('.server-indicator');
-        if (!indicator) continue;
+        if (!indicator) return;
         
         indicator.classList.remove('connecting', 'connected', 'failed');
         indicator.textContent = '待检测';
-    }
+    });
 }
 
 /**

@@ -37,7 +37,7 @@ class ApiClient {
         // 轮询定时器
         this.pollTimer = null;
         
-        // 是否使用本地模式（当服务器不可用时）
+        // 默认使用本地模式，直到API可用性检测完成
         this.useLocalMock = true;
         
         // 本地存储的房间数据
@@ -47,6 +47,116 @@ class ApiClient {
         this.localMessages = {};
         
         console.log('API客户端初始化，客户端ID:', this.clientId);
+        
+        // 检测API可用性
+        this.detectApiAvailability();
+    }
+    
+    /**
+     * 检测API可用性
+     */
+    async detectApiAvailability() {
+        try {
+            console.log('正在检测API服务器可用性...');
+            const response = await fetch(this.baseUrl + '/room-manager', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    action: 'ping',
+                    peerId: this.clientId
+                })
+            });
+            
+            if (response.ok) {
+                console.log('API服务器可用，使用远程模式');
+                this.useLocalMock = false;
+                return;
+            }
+            
+            throw new Error('API服务器响应错误');
+        } catch (error) {
+            console.warn('API服务器不可用，使用本地模式:', error.message);
+            this.useLocalMock = true;
+            
+            // 显示本地模式通知
+            this.showLocalModeNotification();
+        }
+    }
+    
+    /**
+     * 显示本地模式通知
+     */
+    showLocalModeNotification() {
+        // 创建通知元素
+        const notification = document.createElement('div');
+        notification.className = 'local-mode-notification';
+        notification.innerHTML = `
+            <div class="notification-content">
+                <div class="notification-title">本地模式</div>
+                <div class="notification-message">
+                    API服务器不可用，已切换到本地模式。
+                    <br>房间数据将保存在浏览器中，刷新页面后可能丢失。
+                </div>
+                <button class="notification-close">确定</button>
+            </div>
+        `;
+        
+        // 添加样式
+        const style = document.createElement('style');
+        style.textContent = `
+            .local-mode-notification {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #f44336;
+                color: white;
+                padding: 15px;
+                border-radius: 5px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+                z-index: 1000;
+                max-width: 300px;
+                animation: slideIn 0.3s ease-out;
+            }
+            .notification-title {
+                font-weight: bold;
+                margin-bottom: 8px;
+            }
+            .notification-message {
+                font-size: 14px;
+                margin-bottom: 10px;
+            }
+            .notification-close {
+                background: white;
+                color: #f44336;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                cursor: pointer;
+                float: right;
+            }
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+        `;
+        
+        document.head.appendChild(style);
+        document.body.appendChild(notification);
+        
+        // 点击关闭按钮移除通知
+        const closeButton = notification.querySelector('.notification-close');
+        closeButton.addEventListener('click', () => {
+            notification.remove();
+        });
+        
+        // 10秒后自动关闭
+        setTimeout(() => {
+            if (document.body.contains(notification)) {
+                notification.remove();
+            }
+        }, 10000);
     }
     
     /**
